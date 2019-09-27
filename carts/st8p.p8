@@ -238,6 +238,7 @@ local k_right,k_left=4,8
 local z_near=0.05
 
 -- voxel helpers
+local vk
 function to_tile_coords(v)
 	local x,y=shr(v[1],3)+16,shr(v[3],3)+16
 	return flr(x),flr(y),x,y
@@ -253,7 +254,7 @@ function make_cam()
 	local view_mode=0
 	-- view offset/angle/lag
 	local view_pov={
-		{-1.65,4.125,0.04},
+		{-0,1.8,0.08},
 		{-0.7,0.3,0.1},
 		{-0.01,0.1,0.6}
 	}
@@ -396,7 +397,7 @@ end
 -- "physic body" for simple car
 function make_car(p,angle)
 	-- last contact face
-	local oldf
+	local up,oldf={0,1,0}
 
 	local velocity,angularv={0,0,0},0
 	local forces,torque={0,0,0},0
@@ -413,7 +414,7 @@ function make_car(p,angle)
 			return make_m_from_v_angle(oldf and oldf.n or v_up,angle)
 		end,
 		get_up=function()
-			return oldf and oldf.n or v_up
+			return up
 		end,
 		-- contact face
 		get_ground=function()
@@ -468,7 +469,11 @@ function make_car(p,angle)
 				oldf=newf
 			end
 			-- above 0
-			pos[2]=max(pos[2]-0.1,newpos and newpos[2] or 0)
+			if newpos and pos[2]<=newpos[2] then
+				up=newf.n			
+				pos[2]=newpos[2]
+			end
+			pos[2]=max(pos[2]-0.2)
 		end
 	}	
 end
@@ -504,15 +509,14 @@ end
 
 
 function is_inside(p,f)
-	local v=track.v
-	local p0=v[f[f.ni]]
+	local p0=vk(f[f.ni])
 	for i=1,f.ni do
-		local p1=v[f[i]]
+		local p1=vk(f[i])
 		if((p0[3]-p1[3])*(p[1]-p0[1])+(p1[1]-p0[1])*(p[3]-p0[3])<0) return
 		p0=p1
 	end
 	-- intersection point
-	local t=-v_dot(make_v(v[f[1]],p),f.n)/f.n[2]
+	local t=-v_dot(make_v(vk(f[1]),p),f.n)/f.n[2]
 	p=v_clone(p)
 	p[2]+=t
 	return f,p
@@ -581,6 +585,7 @@ end
 
 function _init()
 	track=unpack_track()
+	vk=track.vk
 
 	-- init state machine
 	next_state(play_state)
@@ -606,8 +611,8 @@ end
 local v_cache_cls={
 	__index=function(t,k)
 		-- inline: local a=m_x_v(t.m,t.v[k]) 
-		local v,m=t.v[k],t.m
-		local x,y,z=v[1],v[2],v[3]
+		local m=t.m
+		local x,y,z=4*(k%64)-128,t.v[k],4*flr(k/64)-128
 		local ax,az=m[1]*x+m[5]*y+m[9]*z+m[13],m[3]*x+m[7]*y+m[11]*z+m[15]
 	
 		local outcode=az>z_near and k_far or k_near
@@ -662,14 +667,14 @@ function draw_faces(faces,v_cache)
 		if d.f.n[2]<0.6 then
 			c0=0x54
 			if(d.dist>4) c0=0x4d
-			if(d.dist>5) c0=0xdc
+			if(d.dist>5) c0=0xd5
 			local c=5*d.f.n[2]
 			local cf=(#dither_pat-1)*(1-c%1)
 			fillp(dither_pat[flr(cf)+1])
 			
 		else
 			if(d.dist>4) c0=0x6d
-			if(d.dist>5) c0=0xdc
+			if(d.dist>5) c0=0xd5
 			local c=5*d.f.n[2]
 			local cf=(#dither_pat-1)*(1-c%1)
 			fillp(dither_pat[flr(cf)+1])
@@ -702,10 +707,8 @@ function _draw()
 	sort(out)
 	draw_faces(out,v_cache)
  	
-	print("64x64 mesh w.hidden surf removal",1,1,6)
-	print("+ 6dof + surf tracking",41,8,6)
-	local cpu=flr(10000*stat(1))/100
-	print(stat(7).." fps - cpu "..cpu,57,15,5)
+ 	local cpu=flr(10000*stat(1))/100
+ 	print(cpu.."%",2,2,2)
 	
 	spr(9,24+6*cos(time()/4),128-28+4*sin(time()/5),4,4)
 	spr(9,84-5*cos(time()/5),128-28+4*sin(time()/4),4,4,true)
@@ -713,39 +716,58 @@ end
 
 -->8
 -- generate map
+
 function make_map(model)
 	-- vertices
 	local v=model.v
 	for j=0,63 do
 		for i=0,63 do
-			local y=sget(i,j)
-			add(v,{4*i-128,y,4*j-128})
+			v[i+shl(j,6)]=sget(i,j)
 		end
 	end
 
 	local voxels=model.voxels
+	local function vk(k)
+		local z=shl(flr(shr(k,6)),2)-128
+		return {shl((k%64),2)-128,v[k],z}
+	end
+	model.vk=vk
 
 	for i=0,62 do
 		for j=0,62 do
-			local f={flags=0x16,c=1,ni=4}
-			f[1]=i+shl(j,6)+1
-			f[2]=i+1+shl(j,6)+1
-			f[3]=i+1+shl(j+1,6)+1
-			f[4]=i+shl(j+1,6)+1
-
-			-- normal 
-			f.n=v_cross(make_v(v[f[1]],v[f[f.ni]]),make_v(v[f[1]],v[f[2]]))
-			v_normz(f.n)
-
-			-- cp
-			f.cp=v_dot(f.n,model.v[f[1]])
-
-			model.f[i+shl(j,5)+1]=f
+			local f={ni=4}
+			f[1]=i+shl(j,6)
+			f[2]=i+1+shl(j,6)
+			f[3]=i+1+shl(j+1,6)
+			f[4]=i+shl(j+1,6)
 
 			-- voxel location
 			local vidx=flr(i/2)+shl(flr(j/2),5)
 			voxels[vidx]=voxels[vidx] or {}
-			add(voxels[vidx],f)
+
+			-- normal 
+			local n0=v_cross(make_v(vk(f[1]),vk(f[4])),make_v(vk(f[1]),vk(f[3])))
+			v_normz(n0)
+			local n1=v_cross(make_v(vk(f[1]),vk(f[3])),make_v(vk(f[1]),vk(f[2])))
+			v_normz(n1)
+			if v_dot(n0,n1)>0.995 then
+			 -- quad
+				f.n=n0
+
+				-- cp	
+				f.cp=v_dot(f.n,vk(f[1]))
+				add(voxels[vidx],f)
+			else
+			 -- 2 tri
+			 local f0={f[1],f[3],f[4],ni=3,n=n0}
+				f0.cp=v_dot(f0.n,vk(f0[1]))
+				add(voxels[vidx],f0)
+			 local f1={f[1],f[2],f[3],ni=3,n=n1}
+				f1.cp=v_dot(f1.n,vk(f1[1]))
+				add(voxels[vidx],f1)
+			end
+
+		 --add(model.f,f)
 		end
 	end
 		
@@ -844,7 +866,7 @@ end
 
 __gfx__
 00000000000000000000010000000000000000000000000111222332100000000000000000000000006666660000000000000000c00000000000000000000000
-00000000000000000000000000000000000000000000000000012343210000000000000000000000555555557000000000000000c1dd67000000000000000000
+00000000000000000000000000000000000000000000000000012343210000000000000000000000555555557000000000000000c1d670000000000000000000
 00000000000000000000000000000000000000000000000000124555321000000000000000000002222222222700000000000000c00000000000000000000000
 00000000012221000000011100011100000000100000000001347787532110000000000000000022222222222220000000000000c12450000000000000000000
 00000000134443100001122212234320000122211000111113579876543210000000000000000022222222222220000000000000c00000000000000000000000

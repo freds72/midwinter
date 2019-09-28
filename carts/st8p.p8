@@ -332,19 +332,15 @@ function make_cam()
 			self.pos=pos
 		end,
 		project_poly=function(self,p,c0)
-			local cache={}
 			local p0,p1=p[1],p[2]
 			-- magic constants = 89.4% vs. 90.9%
 			-- shl = 79.7% vs. 80.6%
-			local x0,y0=63.5+flr(shl(p0[1]/p0[3],6)),63.5-flr(shl(p0[2]/p0[3],6))
-			cache[1]={x0,y0}
-			local x1,y1=63.5+flr(shl(p1[1]/p1[3],6)),63.5-flr(shl(p1[2]/p1[3],6))
-			cache[2]={x1,y1}
+			local x0,y0=p0.x or 63.5+flr(shl(p0[1]/p0[3],6)),p0.y or 63.5-flr(shl(p0[2]/p0[3],6))
+			local x1,y1=p1.x or 63.5+flr(shl(p1[1]/p1[3],6)),p1.y or 63.5-flr(shl(p1[2]/p1[3],6))
 			for i=3,#p do
 				local p2=p[i]
-				local x2,y2=63.5+flr(shl(p2[1]/p2[3],6)),63.5-flr(shl(p2[2]/p2[3],6))
+				local x2,y2=p2.x or 63.5+flr(shl(p2[1]/p2[3],6)),p2.y or 63.5-flr(shl(p2[2]/p2[3],6))
 				trifill(x0,y0,x1,y1,x2,y2,c0)
-				cache[i]={x2,y2}
 				x1,y1=x2,y2
 			end
 		end,
@@ -565,9 +561,18 @@ function play_state()
 
 	-- start over
 	actors={}
+	-- actors
+	for i=1,128 do
+		local pos={rnd(256)-128,0,rnd(256)-128}
+		local f,p=find_face(pos)
+		if f then
+			pos[2]=p[2]
+			add(actors,{pos=pos,sx=104,sy=16})
+		end
+	end
 
 	-- create player in correct direction
-	plyr=add(actors,make_plyr(track.start_pos,0))
+	plyr=make_plyr(track.start_pos,0)
 
 	-- reset cam	
 	cam=make_cam()
@@ -612,7 +617,7 @@ local v_cache_cls={
 	__index=function(t,k)
 		-- inline: local a=m_x_v(t.m,t.v[k]) 
 		local m=t.m
-		local x,y,z=4*(k%64)-128,t.v[k],4*flr(k/64)-128
+		local x,y,z=shl(k%64,2)-128,t.v[k],shl(flr(shr(k,6)),2)-128
 		local ax,az=m[1]*x+m[5]*y+m[9]*z+m[13],m[3]*x+m[7]*y+m[11]*z+m[15]
 	
 		local outcode=az>z_near and k_far or k_near
@@ -620,7 +625,8 @@ local v_cache_cls={
 		elseif -ax>az then outcode+=k_left
 		end	
 
-		t[k]={ax,m[2]*x+m[6]*y+m[10]*z+m[14],az,outcode=outcode}
+		local ay=m[2]*x+m[6]*y+m[10]*z+m[14]
+		t[k]={ax,ay,az,outcode=outcode,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6))}
 		return t[k]
 	end
 }
@@ -642,7 +648,7 @@ function collect_faces(faces,cam_pos,v_cache,out,dist)
 			end
 			-- mix of near/far verts?
 			if outcode==0 then
-	   			-- average before changing verts
+	   			-- average before clipping verts
 				y/=#verts
 				z/=#verts
 
@@ -659,29 +665,35 @@ function collect_faces(faces,cam_pos,v_cache,out,dist)
 end
 
 local dither_pat={0xffff,0x7fff,0x7fdf,0x5fdf,0x5f5f,0x5b5f,0x5b5e,0x5a5e,0x5a5a,0x1a5a,0x1a4a,0x0a4a,0x0a0a,0x020a,0x0208,0x0000}
-local ramp={7,7,6,5,1,1}
-function draw_faces(faces,v_cache)
-	for i=1,#faces do
-		local d=faces[i]
-		local c0=0x76
-		if d.f.n[2]<0.6 then
-			c0=0x54
-			if(d.dist>4) c0=0x4d
-			if(d.dist>5) c0=0xd5
-			local c=5*d.f.n[2]
-			local cf=(#dither_pat-1)*(1-c%1)
-			fillp(dither_pat[flr(cf)+1])
-			
+function draw_object(objects)	
+	for i=1,#objects do
+		local d=objects[i]
+		if d.a then
+			-- sprite
+			local w=4*d.w
+			sspr(0,64,16,16,d.x-w/2,d.y-w,w,w)
 		else
-			if(d.dist>4) c0=0x6d
-			if(d.dist>5) c0=0xd5
-			local c=5*d.f.n[2]
-			local cf=(#dither_pat-1)*(1-c%1)
-			fillp(dither_pat[flr(cf)+1])
+			-- triangle
+			local c0=0x76
+			if d.f.n[2]<0.6 then
+				c0=0x54
+				if(d.dist>4) c0=0x4d
+				if(d.dist>5) c0=0xd5
+				local c=5*d.f.n[2]
+				local cf=(#dither_pat-1)*(1-c%1)
+				fillp(dither_pat[flr(cf)+1])
+				
+			else
+				if(d.dist>4) c0=0x6d
+				if(d.dist>5) c0=0xd5
+				local c=5*d.f.n[2]
+				local cf=(#dither_pat-1)*(1-c%1)
+				fillp(dither_pat[flr(cf)+1])
+			end
+			cam:project_poly(d.v,c0)
+			fillp()
 		end
-		cam:project_poly(d.v,c0)
 	end
-	fillp()
 end
 
 function _draw()
@@ -694,22 +706,42 @@ function _draw()
 
 	local tiles=cam:visible_tiles()
 	local out={}
+	local sprites={}
 	-- get visible voxels
 	for k,dist in pairs(tiles) do
 	--for k,_ in pairs(track.voxels) do
 		local faces=track.voxels[k]
 		if faces then
 			collect_faces(faces,cam.pos,v_cache,out,dist)
+			if k%2==0 and #out>0 then				
+				add(sprites,{pos=out[1].v[1],sx=104,sy=16})
+			end
 		end
 	end
 
+	-- sprites
+	local m=cam.m
+	for _,actor in pairs(actors) do
+		local x,y,z=actor.pos[1],actor.pos[2],actor.pos[3]
+		local az=m[3]*x+m[7]*y+m[11]*z+m[15]
+		if az>z_near and az<32 then	
+			local ax=m[1]*x+m[5]*y+m[9]*z+m[13]
+			local ay=m[2]*x+m[6]*y+m[10]*z+m[14]
+			add(out,{key=1/(ay*ay+az*az),a=actor,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=63.5/az})
+		end
+	end
+	-- sprite cache
+	local angle=atan2(cam.m[5],cam.m[6])+0.25
+	rspr(104,16,0,64,angle,2)
+
 	-- todo: sort by voxels
 	sort(out)
-	draw_faces(out,v_cache)
+	draw_object(out)
  	
  	local cpu=flr(10000*stat(1))/100
  	print(cpu.."%",2,2,2)
-	
+	print(#actors,2,8,2)
+
 	spr(9,24+6*cos(time()/4),128-28+4*sin(time()/5),4,4)
 	spr(9,84-5*cos(time()/5),128-28+4*sin(time()/4),4,4,true)
 end
@@ -767,7 +799,6 @@ function make_map(model)
 				add(voxels[vidx],f1)
 			end
 
-		 --add(model.f,f)
 		end
 	end
 		
@@ -781,7 +812,7 @@ function unpack_track()
 		f={},
 		voxels={},
 		ground={},
-		start_pos={-127,0,-127}}	
+		start_pos={0,0,0}}	
 
 	-- fill map
 	make_map(model)
@@ -789,6 +820,29 @@ function unpack_track()
 	return model	
 end
 
+
+-->8 
+-- rotation
+function rspr(sx,sy,x,y,a,w)
+	local ca,sa=cos(a),sin(a)
+	local ddx0,ddy0=ca,sa
+	local mask=shl(0xfff8,(w-1))
+	w=shl(w,2)
+	local dx0,dy0=(sa-ca)*(w-0.5)+w,(ca+sa)*(0.5-w)+w
+	w=shl(w,1)-1
+	for ix=x,x+w do
+		local srcx,srcy=dx0,dy0
+		for iy=y,w+y do
+			if band(bor(srcx,srcy),mask)==0 then
+				sset(ix,iy,sget(sx+srcx,sy+srcy))
+			end
+			srcx-=ddy0
+			srcy+=ddx0
+		end
+	dx0+=ddx0
+	dy0+=ddy0
+	end
+end
 
 -->8
 -- trifill & clipping
@@ -881,21 +935,21 @@ __gfx__
 00123578764321122221000000000000000025664323467999754467775310000000000000000028888888888888880000000000000000000000000000000000
 00012456665321011000000000000000000003442001359cefca6467896410000000000000000028888888888888880000000000000000000000000000000000
 00001234665421000000000000000000000000000000148efffea667876420000000000000000028888888998888880000000000000000000000000000000000
-00000124666532100000000000000000000000000000037effffc7577764200000000000000000288888899a9888888000000000000000000000000000000000
-00000124787532210000000100012334200000000000015dfffff856776421000000000000000028888889aaa988888000000000000000000000000000000000
-000001368986422210000011124799877630000000000018fffffc5577542100000000000000002888889a888a98888000000000000000000000000000000000
-00000147bb96433321001233357beffda973000000000004efffff757654210000000000000000028888988888a9888000000000000000000000000000000000
-00000248ab96433321112465558cffffda97555441000002cfffff945543211000000000000000028889a888888a888800000000000000000000000000000000
-00000258a985333321113798667bfffebabbaabdc8300002bfffff93333221100000000000000002888a88888888888800000000000000000000000000000000
-0000136aa8632232100159ba8669dedb99adefffeca40001afffffb3222222110000000000000002888888889888888800000000000000000000000000000000
-0000258aa7421222100269cd9768aba98abefffffec830016fffffb5322222210000000000000002888888899988888800000000000000000000000000000000
-000026adb8422221000159dda7679a988abefffffed940004bffffd753322110000000000000000288888889aa98888800000000000000000000000000000000
-000037dfe9522321000148bb97689a9989adfeedffd9400028ffffe96432211000000000000000002888889a88a9888880000000000000000000000000000000
-011238dfeb643331000025888668aa98679cddbbefda500015cfffb8643211000000000000000000288888988888888880000000000000000000000000000000
-122248dffc8654321000268876679a86447acbaacfeb6100038cdb96443210010000000000000000288888888888888880000000000000000000000000000000
-234358cffca765543221369ba87677632369bbbcdfec720002799774322110010000000000000000288888888888888880000000000000000000000000000000
-345457addca8776664446adffc9653322347acddffed830001687543221001120000000000000000288888888888888888000000000000000000000000000000
-3455679bba88788896669effffb632221237bdedfffea40002687444321011120000000000000000028888888888888888000000000000000000000000000000
+00000124666532100000000000000000000000000000037effffc7577764200000000000000000288888899a98888880000000000000000bb000000000000000
+00000124787532210000000100012334200000000000015dfffff856776421000000000000000028888889aaa98888800000000000000053bb00000000000000
+000001368986422210000011124799877630000000000018fffffc5577542100000000000000002888889a888a98888000000000000000b53d00000000000000
+00000147bb96433321001233357beffda973000000000004efffff757654210000000000000000028888988888a98880000000000000035bbbb0000000000000
+00000248ab96433321112465558cffffda97555441000002cfffff945543211000000000000000028889a888888a8888000000000000053bbbb0000000000000
+00000258a985333321113798667bfffebabbaabdc8300002bfffff93333221100000000000000002888a8888888888880000000000000b533bb0000000000000
+0000136aa8632232100159ba8669dedb99adefffeca40001afffffb3222222110000000000000002888888889888888800000000000035b5b33d000000000000
+0000258aa7421222100269cd9768aba98abefffffec830016fffffb53222222100000000000000028888888999888888000000000000535bbbbb000000000000
+000026adb8422221000159dda7679a988abefffffed940004bffffd753322110000000000000000288888889aa988888000000000000b533bbbb000000000000
+000037dfe9522321000148bb97689a9989adfeedffd9400028ffffe96432211000000000000000002888889a88a988888000000000035b5b333bb00000000000
+011238dfeb643331000025888668aa98679cddbbefda500015cfffb8643211000000000000000000288888988888888880000000000535b5bbb3d00000000000
+122248dffc8654321000268876679a86447acbaacfeb6100038cdb964432100100000000000000002888888888888888800000000005535bbbbbb00000000000
+234358cffca765543221369ba87677632369bbbcdfec720002799774322110010000000000000000288888888888888880000000000000011000000000000000
+345457addca8776664446adffc9653322347acddffed830001687543221001120000000000000000288888888888888888000000000000044000000000000000
+3455679bba88788896669effffb632221237bdedfffea40002687444321011120000000000000000028888888888888888000000000000444400000000000000
 355677999877789887779dddeee953221118acdffffeb50001566445321111220000000000000000028888888888888888000000000000000000000000000000
 355677988767778876567bbbccdb743221069abcffffc60000365454332222220000000000000000000000000000000000000000000000000000000000000000
 244678987766788875334689abcc975321158aaadfffd60000365544433321120000000000000000000000000000000000000000000000000000000000000000

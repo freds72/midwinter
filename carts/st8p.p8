@@ -41,21 +41,16 @@ end
 function v_len(v)
 	local x,y,z=v[1],v[2],v[3]
 	local d=max(max(abs(x),abs(y)),abs(z))
-	if(d<0.001) return 0
 	x/=d
 	y/=d
 	z/=d
 	return d*(x*x+y*y+z*z)^0.5
 end
 function v_normz(v)
-	local d=v_dot(v,v)
-	if d>0.001 then
-		d=d^.5
-		v[1]/=d
-		v[2]/=d
-		v[3]/=d
-	end
-	return d
+	local d=v_len(v)
+	v[1]/=d
+	v[2]/=d
+	v[3]/=d
 end
 function v_cross(a,b)
 	local ax,ay,az=a[1],a[2],a[3]
@@ -325,7 +320,7 @@ function make_cam()
 			self.pos=pos
 		end,
 		project_poly=function(self,p,c0)
-			--[[
+
 			local p0,p1=p[1],p[2]
 			-- magic constants = 89.4% vs. 90.9%
 			-- shl = 79.7% vs. 80.6%
@@ -337,8 +332,8 @@ function make_cam()
 				trifill(x0,y0,x1,y1,x2,y2,c0)
 				x1,y1=x2,y2
 			end
-			]]
 
+			--[[
 			local p0=p[#p]
 			local x0,y0=p0.x or 63.5+flr(shl(p0[1]/p0[3],6)),p0.y or 63.5-flr(shl(p0[2]/p0[3],6))
 			for i=1,#p do
@@ -347,6 +342,7 @@ function make_cam()
 				line(x0,y0,x1,y1,1)
 				x0,y0=x1,y1
 			end
+			]]
 		end
 	}
 end
@@ -593,6 +589,8 @@ function _draw()
 
 	spr(9,24+6*cos(time()/4),128-28+4*sin(time()/5),4,4)
 	spr(9,84-5*cos(time()/5),128-28+4*sin(time()/4),4,4,true)
+
+	ground:debug_draw()
 end
 
 -->8
@@ -636,7 +634,7 @@ function make_ground(model)
 		-- height array
 		local h={}
 		for i=0,nx-1 do
-	 		h[i]=0--rnd(32)
+	 		h[i]=rnd(32)
 		end
 		-- smoothing
 		for k=1,2 do
@@ -665,17 +663,16 @@ function make_ground(model)
 			v_normz(n0)
 			local n1=v_cross(make_v(v0,v2),make_v(v0,v1))
 			v_normz(n1)
+			local v=n1
 			if v_dot(n0,n1)>0.995 then
 				-- quad
 				f[fi]={n=n0,cp=v_dot(n0,v0)}
-				fi+=2
 			else
 				-- 2 tri
 				f[fi]={n=n0,cp=v_dot(n0,v0)}
-				fi+=1
-				f[fi]={n=n1,cp=v_dot(n1,v0)}
-				fi+=1
+				f[fi+1]={n=n1,cp=v_dot(n1,v0)}
 			end
+			fi+=2
 		end
 		-- attach faces to slice
 		s0.f=f
@@ -690,7 +687,7 @@ function make_ground(model)
 	end
 
 	local function collect_face(face,vertices,v_cache,cam_pos,out,dist)		
-		if true then --v_dot(face.n,cam_pos)>face.cp then
+		if v_dot(face.n,cam_pos)>face.cp then
 			local z,y,outcode,verts,is_clipped=0,0,0xffff,{},0
 			-- project vertices (indices)
 			for ki,vi in pairs(vertices) do
@@ -798,6 +795,21 @@ function make_ground(model)
 			end
 
 			return tiles
+		end,
+		debug_draw=function(self)
+			local y=8
+			for j=0,nz-1 do
+				local s0=slices[j]
+				if s0.f then
+					print(#s0.f,2,y,7)
+					y+=6					
+					--[[
+					for i,f in pairs(s0.f) do
+						pset(64+i,nz-j,i%2==0 and 1 or 8)
+					end
+					]]
+				end
+			end
 		end
 	}
 end

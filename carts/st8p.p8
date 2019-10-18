@@ -558,61 +558,15 @@ function menu_state()
 	return {
 		-- draw
 		draw=function()
-			cls(1)
+			cls(12)
 
-			-- draw horizon
-			local zfar=-128
-			local farplane={
-					{-zfar,zfar,zfar},
-					{-zfar,-zfar,zfar},
-					{zfar,-zfar,zfar},
-					{zfar,zfar,zfar}}
-			-- cam up in world space
-			local n=m_up(cam.m)
+			local out={}
+			local sprites={}
+			-- get visible voxels
+			ground:collect_drawables(cam.pos,cam.angle,out,dist)
 
-			-- todo: simplify
-			local p=v_clone(cam.pos)
-			p=m_x_v(cam.m,p)
-			n[4]=v_dot(p,n)
-			farplane=plane_poly_clip(n,farplane)
-			cam:project_poly(farplane,12)
-			local p0,p1
-			for i=1,#farplane do
-				local p=farplane[i]
-				if p[4] then
-					if p0 then
-						p1=p
-						break
-					else
-						p0=p
-					end
-				end
-			end
-			-- find intersection with center
-			if p0 and p1 then
-				local x0,y0=cam:project2d(p0)
-				--circfill(x0,y0,2,8)
-				local x1,y1=cam:project2d(p1)
-				--circfill(x1,y1,2,11)
-				local dx,dy=x1-x0,y1-y0
-				local d=sqrt(dx*dx+dy*dy)
-				local u={dx/d,dy/d}
-				-- project center on segment
-				local t0=(63.5-x0)*u[1]+(63.5-y0)*u[2]
-				local xc,yc=x0+t0*u[1],y0+t0*u[2]
-				local t1=-(64-x1)*u[1]-(64-y1)*u[2]
-
-				--if(t0>t1) t0,t1=t1,t0
-				
-				for t=0,t0,8 do
-					local x,y=x0+t*u[1],y0+t*u[2]				
-					-- circfill(x,y,2,8)
-				end
-				--circfill(xc,yc,8,7)
-
-				local v={-u[2],u[1]}
-
-			end
+			sort(out)
+			draw_drawables(out)
 
 			local y=20
 			local a,da=0,1/3
@@ -764,7 +718,7 @@ function play_state()
 		
 			-- todo: sort by voxels
 			sort(out)
-			draw_object(out)
+			draw_drawables(out)
 			 
 			 local cpu=flr(10000*stat(1))/100
 			 print(cpu.."%",2,2,2)
@@ -807,7 +761,7 @@ end
 
 
 local dither_pat={0xffff,0x7fff,0x7fdf,0x5fdf,0x5f5f,0x5b5f,0x5b5e,0x5a5e,0x5a5a,0x1a5a,0x1a4a,0x0a4a,0x0a0a,0x020a,0x0208,0x0000}
-function draw_object(objects)	
+function draw_drawables(objects)	
 	for i=1,#objects do
 		local d=objects[i]
 		if d.a then

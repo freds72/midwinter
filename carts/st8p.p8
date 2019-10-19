@@ -158,10 +158,10 @@ function m_fwd(m)
 end
 
 -- coroutine helper
-function corun(f)
+function corun(f,arg0,arg1,arg2)
 	local cs=costatus(f)
 	if cs=="suspended" then
-		assert(coresume(f))
+		assert(coresume(f,arg0,arg1,arg2))
 		return f
 	end
 	return nil
@@ -222,6 +222,24 @@ function sort(data)
  end
 end
 
+-- fade ramp
+local fade_ramps={}
+function whiteout_async(delay,t0,t1)
+	for i=1,delay do
+		yield()
+	end
+	for i=t0,t1,t1>t0 and 1 or -1 do
+		-- fade to white
+		local c=min(5,flr(5*((t1-i)/(t1-t0))))
+		for i=0,15 do
+			pal(i,fade_ramps[i][c],1)
+		end
+		yield()
+	end
+	-- 
+	pal()
+end
+
 -->8
 -- main engine
 -- global vars
@@ -230,7 +248,7 @@ local actors={}
 
 local k_far,k_near=0,2
 local k_right,k_left=4,8
-local z_near=0.05
+local z_near=0.5
 
 -- camera
 function make_cam()
@@ -617,27 +635,15 @@ function menu_state()
 			end
 
 			--
-			cam:track({0,1,0},sel/3,v_up)
+			cam:track({32*8,15,32*8},sel/3,v_up)
 		end
 	}
 end
 
 function zoomin_state(next,params)
-	local ttl,dttl=20,0.01
+	local ttl,dttl=30,0.01
 
-	-- 
-	local ramps={}
-	for i=0,15 do
-		local c0,r=i,{}
-		ramps[i]=r
-		for j=0,4 do
-			-- lookup color for c0
-			local c=sget(25,c0)
-			r[j]=sget(25,c)
-			-- move to next color
-			c0=c
-		end
-	end
+	local fade=cocreate(whiteout_async)
 
 	-- copy backbuffer
 	memcpy(0x0,0x6000,128*64)
@@ -645,22 +651,18 @@ function zoomin_state(next,params)
 	return {
 		-- draw
 		draw=function()
-			-- fade to white
-			local c=min(4,flr(5*((20-ttl)/20)))
-			for i=0,15 do
-				pal(i,ramps[i][c])
-			end
-
+			pal()
 			-- zoom effect
-			local s=(3*(20-ttl)/20+1)
+			local s=(3*(30-ttl)/30+1)
 			palt(0,false)
 			local dx=-abs(64*s-64)		
 			sspr(0,0,128,128,dx,dx,128*s,128*s)
-			pal()
+			if(fade) fade=corun(fade,15,0,15)
 		end,
 		update=function(self)
 			ttl-=dttl
 			dttl+=0.08
+
 			if ttl<0 then
 				pop_state()
 				-- restore spritesheet
@@ -673,6 +675,8 @@ function zoomin_state(next,params)
 end
 
 function play_state()
+
+	local fade_async=cocreate(whiteout_async)
 
 	-- start over
 	actors={}
@@ -728,6 +732,8 @@ function play_state()
 			spr(9,84-5*cos(time()/5),128-28+4*sin(time()/4),4,4,true)
 		
 			ground:debug_draw()
+
+			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
 		-- update
 		update=function()
@@ -745,6 +751,19 @@ function play_state()
 end
 
 function _init()
+	-- white out ramp
+	for i=0,15 do
+		local c0,r=i,{[0]=i}
+		fade_ramps[i]=r
+		for j=1,5 do
+			-- lookup color for c0
+			local c=sget(25,c0)
+			r[j]=sget(25,c)
+			-- move to next color
+			c0=c
+		end
+	end
+
 	--
 	ground=make_ground()
 

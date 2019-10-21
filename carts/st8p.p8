@@ -252,20 +252,6 @@ local z_near=0.5
 
 -- camera
 function make_cam()
-	-- views
-	local switching_async
-	-- 0: far
-	-- 1: close
-	-- 2: cockpit
-	local view_mode=0
-	-- view offset/angle/lag
-	local view_pov={
-		{-0,1.8,0.08},
-		{-0.7,0.3,0.1},
-		{-0.01,0.1,0.6}
-	}
-	local current_pov=v_clone(view_pov[view_mode+1])
-
 	--
 	local up={0,1,0}
 
@@ -290,22 +276,6 @@ function make_cam()
 			shky=min(4,shky+pow*v)
 		end,
 		update=function(self)
-			if switching_async then
-				switching_async=corun(switching_async)
-			elseif btnp(4) then
-				local next_mode=(view_mode+1)%#view_pov
-				local next_pov=v_clone(view_pov[next_mode+1])
-				switching_async=cocreate(function()
-					for i=0,29 do
-						local t=smoothstep(i/30)
-						current_pov=v_lerp(view_pov[view_mode+1],next_pov,t)
-						yield()
-					end
-					-- avoid drift
-					current_pov,view_mode=next_pov,next_mode
-				end)
-			end
-
 			shkx*=-0.7-rnd(0.2)
 			shky*=-0.7-rnd(0.2)
 			if abs(shkx)<0.5 and abs(shky)<0.5 then
@@ -316,15 +286,16 @@ function make_cam()
 		track=function(self,pos,a,u)
    			pos=v_clone(pos)
    			-- lerp angle
-			self.angle=lerp(self.angle,a,current_pov[3])
+			self.angle=lerp(self.angle,a,0.08)
 			-- lerp orientation
-			up=v_lerp(up,u,current_pov[3])
+			up=v_lerp(up,u,0.08)
 			v_normz(up)
 
 			-- shift cam position			
 			local m=make_m_from_v_angle(up,self.angle)
-			v_add(pos,m_fwd(m),current_pov[1])
-			v_add(pos,m_up(m),current_pov[2])
+			-- 1.8m player
+			-- v_add(pos,v_up,64)
+			v_add(pos,m_up(m),1.8)
 			
 			-- inverse view matrix
 			m_inv(m)
@@ -341,7 +312,6 @@ function make_cam()
 			return 63.5+flr(shl(v[1]/v[3],6)),63.5-flr(shl(v[2]/v[3],6))
 		end,
 		project_poly=function(self,p,c0)
-
 			local p0,p1=p[1],p[2]
 			-- magic constants = 89.4% vs. 90.9%
 			-- shl = 79.7% vs. 80.6%
@@ -353,7 +323,7 @@ function make_cam()
 				trifill(x0,y0,x1,y1,x2,y2,c0)
 				x1,y1=x2,y2
 			end
-
+			
 			--[[
 			local p0=p[#p]
 			local x0,y0=p0.x or 63.5+flr(shl(p0[1]/p0[3],6)),p0.y or 63.5-flr(shl(p0[2]/p0[3],6))
@@ -437,8 +407,12 @@ function make_car(p,angle)
 			steering_angle*=0.5
 
 			-- find ground
-			local pos=self.pos			
-			local newf,newpos=find_face(pos,oldf)
+			local pos=self.pos
+
+			-- adjust ground
+			ground:update(pos)
+		
+			local newf,newpos=ground:find_face(pos)
 			if newf then
 				oldf=newf
 			end
@@ -447,7 +421,7 @@ function make_car(p,angle)
 				up=newf.n			
 				pos[2]=newpos[2]
 			end
-			pos[2]=max(pos[2]-0.2,24)
+			pos[2]=max(pos[2]-0.2,0)
 		end
 	}	
 end
@@ -481,10 +455,6 @@ function make_plyr(p,angle)
 	return body
 end
 
-function find_face(p,oldf)	
-	-- not found
-end
-
 -- game states
 -- transition to next state
 -- game states
@@ -512,8 +482,8 @@ function menu_state()
 	-- 1: focus
 	-- 2: selected
 	function draw_box(s,x,y,c,mode)
-		rectfill(x-2,y,x+2,127,5)
-		rectfill(x+1,y,x+1,127,6)
+		rectfill(x-2,y-12,x+2,127,5)
+		rectfill(x+1,y-12,x+1,127,6)
 
 		palt(0,false)
 		palt(14,true)
@@ -635,7 +605,7 @@ function menu_state()
 			end
 
 			--
-			cam:track({32*8,15,32*8},sel/3,v_up)
+			cam:track({32*8,25,32*8},sel/3,v_up)
 		end
 	}
 end
@@ -682,8 +652,8 @@ function play_state()
 	actors={}
 	-- actors
 	for i=1,128 do
-		local pos={rnd(256)-128,0,rnd(256)-128}
-		local f,p=find_face(pos)
+		local pos={rnd(128),0,rnd(128)}
+		local f,p=ground:find_face(pos)
 		if f then
 			pos[2]=p[2]
 			add(actors,{pos=pos,sx=104,sy=16})
@@ -691,7 +661,7 @@ function play_state()
 	end
 
 	-- create player in correct direction
-	plyr=make_plyr({0,0,0},0)
+	plyr=make_plyr({32,0,32},0)
 
 	-- reset cam	
 	cam=make_cam()
@@ -702,36 +672,36 @@ function play_state()
 			cls(12)
 
 			local out={}
-			local sprites={}
 			-- get visible voxels
 			ground:collect_drawables(cam.pos,cam.angle,out,dist)
 			
 			-- sprites
 			local m=cam.m
+			local viz=0
 			for _,actor in pairs(actors) do
 				local x,y,z=actor.pos[1],actor.pos[2],actor.pos[3]
 				local az=m[3]*x+m[7]*y+m[11]*z+m[15]
-				if az>z_near and az<32 then	
+				if az>z_near and az<64 then	
 					local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
 					add(out,{key=1/(ay*ay+az*az),a=actor,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=63.5/az})
+					viz+=1
 				end
 			end
 			-- sprite cache
 			local angle=atan2(cam.m[5],cam.m[6])+0.25
 			rspr(104,16,0,64,angle,2)
 		
-			-- todo: sort by voxels
 			sort(out)
 			draw_drawables(out)
 			 
-			 local cpu=flr(10000*stat(1))/100
-			 print(cpu.."%",2,2,2)
-			print(#actors,2,8,2)
+			local cpu=flr(10000*stat(1))/100
+			print(cpu.."%",2,2,2)
+			print(viz.."/"..#actors,2,8,2)
 		
 			spr(9,24+6*cos(time()/4),128-28+4*sin(time()/5),4,4)
 			spr(9,84-5*cos(time()/5),128-28+4*sin(time()/4),4,4,true)
 		
-			ground:debug_draw()
+			ground:debug_draw(64,0)
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
@@ -745,7 +715,9 @@ function play_state()
 			plyr:update()
 		
 			local pos,a=plyr:get_pos()
+
 			cam:track(pos,a,plyr:get_up())
+
 		end
 	}
 end
@@ -778,6 +750,11 @@ function _update()
 	end
 end
 
+function _draw()
+	for state in all(states) do
+		state:draw()
+	end
+end
 
 local dither_pat={0xffff,0x7fff,0x7fdf,0x5fdf,0x5f5f,0x5b5f,0x5b5e,0x5a5e,0x5a5a,0x1a5a,0x1a4a,0x0a4a,0x0a0a,0x020a,0x0208,0x0000}
 function draw_drawables(objects)	
@@ -811,12 +788,6 @@ function draw_drawables(objects)
 	end
 end
 
-function _draw()
-	for state in all(states) do
-		state:draw()
-	end
-end
-
 -->8
 -- generate map
 
@@ -827,6 +798,7 @@ function make_ground(model)
 	-- cell size
 	local dx,dz=32,32
 
+	local dy=0
 	-- ground slices (from 0 to nz-1)
 	local slices={}
 
@@ -840,7 +812,7 @@ function make_ground(model)
 			local i,j=k%nx,flr(k/nx)
 			local s0=slices[j]
 			-- generate vertex
-			local x,y,z=i*dx,s0.h[i]+s0.y,j*dz
+			local x,y,z=i*dx,s0.h[i]+s0.y-dy,j*dz
 			local ax,az=m[1]*x+m[5]*y+m[9]*z+m[13],m[3]*x+m[7]*y+m[11]*z+m[15]
 		
 			local outcode=az>z_near and k_far or k_near
@@ -858,7 +830,7 @@ function make_ground(model)
 		-- height array
 		local h={}
 		for i=0,nx-1 do
-	 		h[i]=rnd(32)
+	 		h[i]=rnd(48)
 		end
 		-- smoothing
 		for k=1,2 do
@@ -903,7 +875,7 @@ function make_ground(model)
 	end
 
 	for j=0,nz-1 do
-		slices[j]=make_slice(0)
+		slices[j]=make_slice(32-j)
 	end
 	-- create faces
 	for j=0,nz-2 do
@@ -911,7 +883,7 @@ function make_ground(model)
 	end
 
 	local function collect_face(face,vertices,v_cache,cam_pos,out,dist)		
-		if v_dot(face.n,cam_pos)>face.cp then
+		if true then --v_dot(face.n,cam_pos)>face.cp then
 			local z,y,outcode,verts,is_clipped=0,0,0xffff,{},0
 			-- project vertices (indices)
 			for ki,vi in pairs(vertices) do
@@ -999,6 +971,7 @@ function make_ground(model)
 		collect_drawables=function(self,cam_pos,cam_angle,out)
 			local tiles=visible_tiles(cam_pos,cam_angle)
 			-- vertex cache
+			-- yoffset
 			local v_cache={m=cam.m}
 			setmetatable(v_cache,v_ground_cache_cls)
 
@@ -1020,20 +993,55 @@ function make_ground(model)
 
 			return tiles
 		end,
-		debug_draw=function(self)
+		update=function(self,p)
+			if p[3]/dz>8 then
+				-- shift back
+				p[3]-=dz
+				local old_y=slices[0].y
+				-- drop slice 0
+				for i=1,nz-1 do
+					slices[i-1]=slices[i]
+					slices[i-1].y-=old_y
+				end
+				-- use previous baseline
+				slices[nz-1]=make_slice(slices[nz-2].y-rnd(3))
+				-- create mesh
+				mesh(nz-2)
+			end
+			-- update y offset
+			local t=(p[3]/dz)%1
+			dy=slices[0].y*(1-t)+t*slices[1].y
+		end,
+		find_face=function(self,p)
+			-- z slice
+			local i,j=self:to_tile_coords(p)
+			if(i<0 or j<0) return
+			local s0=slices[j]
+
+			-- should not happen
+			-- assert(s0,"outside of map: "..i.."/"..j)
+
+			local f0,f1=s0.f[2*i],s0.f[2*i+1]
+			local f=f0
+			-- select face
+			if(f1 and (p[3]-dz*j<p[1]-dx*i)) f=f1
+
+			-- intersection point
+			local t=-v_dot(make_v({i*dx,s0.h[i]+s0.y-dy,j*dz},p),f.n)/f.n[2]
+			p=v_clone(p)
+			p[2]+=t
+			return f,p
+		end,
+		debug_draw=function(self,x,y)
 			local y=8
 			for j=0,nz-1 do
 				local s0=slices[j]
-				if s0.f then
-					print(#s0.f,2,y,7)
-					y+=6					
-					--[[
-					for i,f in pairs(s0.f) do
-						pset(64+i,nz-j,i%2==0 and 1 or 8)
-					end
-					]]
+				for i=0,nx-1 do
+					pset(x+i,y+nz-j,s0.h[i])
 				end
 			end
+			local i,j=self:to_tile_coords(cam.pos)
+			pset(x+i,y+32-j,flr(8*time())%2==0 and 8 or 2)
 		end
 	}
 end
@@ -1135,58 +1143,23 @@ function z_poly_clip(znear,v)
 	return res
 end
 
-function plane_poly_clip(n,v)
-	local dist,allin={},0
-	for i,a in pairs(v) do
-		local d=n[4]-(a[1]*n[1]+a[2]*n[2]+a[3]*n[3])
-		if(d>0) allin+=1
-		dist[i]=d
-	end
-	-- early exit
-	if(allin==#v) return v
-	if(allin==0) return {}
-
-	local res={}
-	local v0,d0,v1,d1,t,r=v[#v],dist[#v]
-	-- use local closure
-	local clip_line=function()
-		local r,t=make_v(v0,v1),d0/(d0-d1)
-		v_scale(r,t)
-		v_add(r,v0)
-		-- flag new point
-		r[4]=true
-		res[#res+1]=r
-	end
-	for i=1,#v do
-		v1,d1=v[i],dist[i]
-		if d1>0 then
-			if(d0<=0) clip_line()
-			res[#res+1]=v1
-		elseif d0>0 then
-			clip_line()
-		end
-		v0,d0=v1,d1
-	end
-	return res
-end
-
 __gfx__
-000000000000000000eeeeee01000000eeeeeeee0000000111222332100000000000000000000000006666660000000000000000000000000000000000000000
-0000000000000000770eeeee15000000eeeeeeee0000000000012343210000000000000000000000555555557000000000000000000000000000000000000000
-0000000000000000cc70eeee28000000eeeeeeee0000000000124555321000000000000000000002222222222700000000000000000000000000000000000000
-0000000001222100ccc70eee3b000000eeeeeeee0000000001347787532110000000000000000022222222222220000000000000009290000000000500000000
-0000000013444310cccc70ee49000000eeeeeeee1000111113579876543210000000000000000022222222222220000000000000002220000000005bb0000000
-0000000024676421ccccc70e5d000000eeeeeeee312223223578987666432100000000000000022222222222222200000000000000929000000003bb3b000000
-0000000135787642ccccc70e67000000eeeeeeee43445555677876656764200000000000000002222222222222220000000000000000000000005b33bb300000
-0000001245777754ccccc70e77000000eeeeeeee5556778777665555787420000000000000000222222222222822000000000000000000000005b5bb33b30000
-0000012445677654cccc70ee8e000000eeeeeeee5568aa987765445687631000000000000000022222282828222220000000000000000000000b5b53bb3b0000
-0000133455556655ccc70eee9a000000eeeeeeee5568abaa8654445676420000000000000000022828228222282820000000000000a8a0000005b5b533bb0000
-0011345665445555cc70eeeea7000000eeeeeeee5468aa987544456654210000000000000000022222222282828280000000000000a8a00000005b3bbbb00000
-0012457765444444770eeeeeb6000000eeeeeeee44468a986433444554210000000000000000022828282828288888000000000000929000000005b533000000
-001246787643333300eeeeeec6000000eeeeeeee4334678875434455553200000000000000000022828288888888880000000000002220000000005bb0000000
-0012357876432112eeeeeeeed6000000eeeeeeee4323467999754467775310000000000000000028888888888888880000000000009290000000000000000000
-0001245666532101eeeeeeeeef000000eeeeeeee2001359cefca6467896410000000000000000028888888888888880000000000000000000000000000000000
-0000123466542100eeeeeeeef7000000eeeeeeee0000148efffea667876420000000000000000028888888998888880000000000000000000000000000000000
+000000000000000000eeeeee01000000eeeeeee00eeeeeee11222332100000000000000000000000006666660000000000000000000000000000000000000000
+0000000000000000770eeeee15000000eeeeee0aa0eeeeee00012343210000000000000000000000555555557000000000000000000000000000000000000000
+0000000000000000cc70eeee28000000eeeee0aaaa0eeeee00124555321000000000000000000002222222222700000000000000000000000000000000000000
+0000000001222100ccc70eee3b000000eeeee0aaaa0eeeee01347787532110000000000000000022222222222220000000000000009290000000000500000000
+0000000013444310cccc70ee49000000eeee0aaaaaa0eeee13579876543210000000000000000022222222222220000000000000002220000000005bb0000000
+0000000024676421ccccc70e5d000000eee0aa0a0aaa0eee3578987666432100000000000000022222222222222200000000000000929000000003bb3b000000
+0000000135787642ccccc70e67000000eee0aaa0aa0a0eee677876656764200000000000000002222222222222220000000000000000000000005b33bb300000
+0000001245777754ccccc70e77000000ee0aaa0a00a0a0ee77665555787420000000000000000222222222222822000000000000000000000005b5bb33b30000
+0000012445677654cccc70ee8e000000e0aaaaaa0a0aaa0e7765445687631000000000000000022222282828222220000000000000000000000b5b53bb3b0000
+0000133455556655ccc70eee9a000000e0aaaaa0a0aaaa0e8654445676420000000000000000022828228222282820000000000000a8a0000005b5b533bb0000
+0011345665445555cc70eeeea70000000aaaaaaa0aaaaaa07544456654210000000000000000022222222282828280000000000000a8a00000005b3bbbb00000
+0012457765444444770eeeeeb60000000aaaaaa0aaaaaaa06433444554210000000000000000022828282828288888000000000000929000000005b533000000
+001246787643333300eeeeeec6000000000000000000000075434455553200000000000000000022828288888888880000000000002220000000005bb0000000
+0012357876432112eeeeeeeed6000000eeeeeeeeeeeeeeee99754467775310000000000000000028888888888888880000000000009290000000000000000000
+0001245666532101eeeeeeeeef000000eeeeeeeeeeeeeeeeefca6467896410000000000000000028888888888888880000000000000000000000000000000000
+0000123466542100eeeeeeeef7000000eeeeeeeeeeeeeeeefffea667876420000000000000000028888888998888880000000000000000000000000000000000
 00000124666532100000000000000000000000000000037effffc7577764200000000000000000288888899a98888880000000000000000bb000000000000000
 00000124787532210000000100012334200000000000015dfffff856776421000000000000000028888889aaa98888800000000000000053bb00000000000000
 000001368986422210000011124799877630000000000018fffffc5577542100000000000000002888889a888a98888000000000000000b53d00000000000000

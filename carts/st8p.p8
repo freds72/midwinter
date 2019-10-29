@@ -389,7 +389,7 @@ end
 -- "physic body" for simple car
 function make_car(p,angle)
 	-- last contact face
-	local up,oldf={0,1,0}
+	local up,on_ground,oldf={0,1,0},false
 
 	local velocity,angularv={0,0,0},0
 	local forces,torque={0,0,0},0
@@ -426,9 +426,9 @@ function make_car(p,angle)
 
 			-- apply some damping
 			angularv*=0.86
-			v_scale(velocity,0.97)
+			-- v_scale(velocity,0.97)
 			-- some friction
-			-- v_add(velocity,velocity,-0.02*v_dot(velocity,velocity))
+			v_add(velocity,velocity,-0.03*v_dot(velocity,velocity))
 		end,
 		integrate=function(self)
 		 	-- update pos & orientation
@@ -441,16 +441,17 @@ function make_car(p,angle)
 			-- reset
 			forces,torque={0,0,0},0
 		end,
-		steer=function(self,steering_dt,rpm)
-			steering_angle+=mid(steering_dt,-0.15,0.15)
+		steer=function(self,steering_dt)
+			local g={0,-9.81,0}
+			self:apply_force_and_torque(g,0)
+			-- on ground?
+			if on_ground==true then
+				local n=v_clone(up)
+				v_scale(n,-v_dot(n,g))
 
-			local fwd=m_fwd(self.m)
-
-			v_scale(fwd,rpm*10)			
-
-			self:apply_force_and_torque(fwd,-steering_angle)
-
-			return min(rpm,max_rpm)
+				steering_angle+=mid(steering_dt,-0.15,0.15)
+				self:apply_force_and_torque(n,-steering_angle)
+			end
 		end,
 		update=function(self)
 			steering_angle*=0.5
@@ -465,41 +466,28 @@ function make_car(p,angle)
 			if newf then
 				oldf=newf
 			end
-			-- gravity
-			pos[2]-=0.2
+			-- stop at ground
+			on_ground=false
 			if newpos and pos[2]<=newpos[2] then
 				up=newf.n			
 				pos[2]=newpos[2]
+				on_ground=true
 			end
 		end
 	}	
 end
 
 function make_plyr(p,angle)
-	local rpm=0
 	local body=make_car(p,angle)
 
-	-- backup parent methods
-	local body_update=body.update
-	
 	body.control=function(self)	
 		local da=0
 		if(btn(0)) da=1
 		if(btn(1)) da=-1
 
-		-- accelerate
-		if btn(2) then
-			rpm=rpm+0.1
-		end
-
-		rpm=self:steer(da/8,rpm)
+		self:steer(da/8)
 	end
 	
-	body.update=function(self)
-		body_update(self)
-		rpm*=0.97
-
-	end
 	-- wrapper
 	return body
 end
@@ -967,8 +955,8 @@ function make_ground(delta_slope)
 		-- flatten track
 		for _,t in pairs(tracks) do
 			local i0,i1=flr(t.x-2),flr(t.x+2)
-			for i=i0,i1 do
-				h[flr(i)]=0
+			for i=i0,i1 do				
+				h[flr(i)]/=4
 				-- remove props from track
 				actors[flr(i)]=nil
 			end
@@ -1152,7 +1140,8 @@ function make_ground(delta_slope)
 					-- generate vertex
 					local v0={i*dx,s0.h[i]+s0.y-dy,j*dz}
 					-- face(s)
-					local f0,f1=s0.f[2*i],s0.f[2*i+1]
+					-- force quad rendering for far away tiles
+					local f0,f1=s0.f[2*i],dist<5 and s0.f[2*i+1]
 					if f1 then
 						-- 2 triangles
 						if(f0) collect_face(v0,f0,s0.actors[i],{k,k+1+nx,k+nx},v_cache,cam_pos,out,dist)

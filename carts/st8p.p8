@@ -311,17 +311,15 @@ function make_cam()
 			self.pos=pos
 		end,
 		project2d=function(self,v)
-			return 63.5+flr(shl(v[1]/v[3],6)),63.5-flr(shl(v[2]/v[3],6))
+			return 63.5+flr(63.5*v[1]/v[3]),63.5-flr(63.5*v[2]/v[3])
 		end,
 		project_poly=function(self,p,c0)
 			local p0,p1=p[1],p[2]
-			-- magic constants = 89.4% vs. 90.9%
-			-- shl = 79.7% vs. 80.6%
-			local x0,y0=p0.x or 63.5+flr(shl(p0[1]/p0[3],6)),p0.y or 63.5-flr(shl(p0[2]/p0[3],6))
-			local x1,y1=p1.x or 63.5+flr(shl(p1[1]/p1[3],6)),p1.y or 63.5-flr(shl(p1[2]/p1[3],6))
+			local x0,y0=p0.x or 63.5+flr(63.5*p0[1]/p0[3]),p0.y or 63.5-flr(63.5*p0[2]/p0[3])
+			local x1,y1=p1.x or 63.5+flr(63.5*p1[1]/p1[3]),p1.y or 63.5-flr(63.5*p1[2]/p1[3])
 			for i=3,#p do
 				local p2=p[i]
-				local x2,y2=p2.x or 63.5+flr(shl(p2[1]/p2[3],6)),p2.y or 63.5-flr(shl(p2[2]/p2[3],6))
+				local x2,y2=p2.x or 63.5+flr(63.5*p2[1]/p2[3]),p2.y or 63.5-flr(63.5*p2[2]/p2[3])
 				trifill(x0,y0,x1,y1,x2,y2,c0)
 				x1,y1=x2,y2
 			end
@@ -387,20 +385,19 @@ function make_cam()
 end
 
 -- "physic body" for simple car
-function make_car(p,angle)
+function make_car(p)
 	-- last contact face
 	local up,on_ground,oldf={0,1,0},false
 
 	local velocity,angularv={0,0,0},0
 	local forces,torque={0,0,0},0
 
-	local steering_angle=0
+	local angle,steering_angle=0,0
 
 	return {
 		pos=v_clone(p),
-		m=make_m_from_euler(0,a,0),
 		get_pos=function(self)
-	 		return self.pos,angle,steering_angle/0.15
+	 		return self.pos,angle,steering_angle/0.625
 		end,
 		get_orient=function()
 			-- todo: lean left/right according to steering
@@ -428,33 +425,66 @@ function make_car(p,angle)
 			angularv*=0.86
 			-- v_scale(velocity,0.97)
 			-- some friction
-			v_add(velocity,velocity,-0.03*v_dot(velocity,velocity))
+			v_add(velocity,velocity,-0.1*v_dot(velocity,velocity))
 		end,
 		integrate=function(self)
 		 	-- update pos & orientation
 			v_add(self.pos,velocity)
-			-- fix
+			-- limit rotating velocity
 			angularv=mid(angularv,-1,1)
-			angle+=angularv			
-			self.m=make_m_from_euler(0,angle,0)
+			angle+=angularv
 
 			-- reset
 			forces,torque={0,0,0},0
 		end,
 		steer=function(self,steering_dt)
-			local g={0,-9.81,0}
+			local g={0,-8,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
-			if on_ground==true then
+			if on_ground==true and v_len(velocity)>0.001 then
 				local n=v_clone(up)
 				v_scale(n,-v_dot(n,g))
 
 				steering_angle+=mid(steering_dt,-0.15,0.15)
-				self:apply_force_and_torque(n,-steering_angle)
+
+				-- slope pushing up
+				self:apply_force_and_torque(n,0)
+
+				-- desired ski direction
+				local m=make_m_from_v_angle(n,angle-steering_angle/16)
+				local right=m_right(m)
+				
+				-- slip angle
+				local sa=-v_dot(velocity,right)
+				if abs(sa)>0.001 then
+					-- max grip
+					sa=mid(sa,-0.1,0.1)
+				
+					-- ski length for torque
+					local fwd=m_fwd(m)
+					local ski_len=0.8
+					v_scale(fwd,ski_len)
+					local torque=v_cross(fwd,right)
+					local l=torque[1]+torque[2]+torque[3]
+					
+					v_scale(right,30*sa)
+
+					self:apply_force_and_torque(right,-steering_angle*ski_len/2)
+				end
+
+				--angle=atan2(velocity[1],velocity[3])+0.25
+
+				-- angle between slope and velocity
+				--[[
+				local slope=v_cross(v_up,up)
+				v_normz(slope)
+				self.friction=v_dot(slope,v)
+				]]
 			end
+			self.friction=on_ground==true and "ground" or "air"
 		end,
 		update=function(self)
-			steering_angle*=0.5
+			steering_angle*=0.8
 
 			-- find ground
 			local pos=self.pos
@@ -726,6 +756,8 @@ function play_state()
 			local cpu=flr(10000*stat(1))/100
 			print(cpu.."%",2,2,2)
 		
+			print(plyr.friction,96,2,2)
+
 			local pos,a,steering=plyr:get_pos()
 
 			spr(9,34+3*cos(time()/4),128-14-14*steering+4*sin(time()/5),4,4)
@@ -751,6 +783,8 @@ function play_state()
 end
 
 function _init()
+	srand(12)
+
 	-- white out ramp
 	for i=0,15 do
 		local c0,r=i,{[0]=i}
@@ -1063,7 +1097,7 @@ function make_ground(delta_slope)
 			local az=m[3]*x+m[7]*y+m[11]*z+m[15]
 			if az>z_near and az<64 then	
 				local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
-				out[#out+1]={key=1/z,a=actor,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=shl(4/az,6),dist=dist}
+				out[#out+1]={key=1/(ay*ay+az*az),a=actor,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=shl(4/az,6),dist=dist}
 			end
 		end
 	end
@@ -1141,7 +1175,7 @@ function make_ground(delta_slope)
 					local v0={i*dx,s0.h[i]+s0.y-dy,j*dz}
 					-- face(s)
 					-- force quad rendering for far away tiles
-					local f0,f1=s0.f[2*i],dist<5 and s0.f[2*i+1]
+					local f0,f1=s0.f[2*i],dist<8 and s0.f[2*i+1]
 					if f1 then
 						-- 2 triangles
 						if(f0) collect_face(v0,f0,s0.actors[i],{k,k+1+nx,k+nx},v_cache,cam_pos,out,dist)

@@ -297,7 +297,7 @@ function make_cam()
 			local m=make_m_from_v_angle(up,self.angle)
 			-- 1.8m player
 			-- v_add(pos,v_up,64)
-			v_add(pos,m_up(m),0.8)
+			v_add(pos,m_up(m),1.6)
 			
 			-- inverse view matrix
 			m_inv(m)
@@ -418,7 +418,7 @@ function make_car(p)
 		end,
 		prepare=function(self)
 			-- gravity and ground
-			local g={0,-4,0}
+			local g={0,-2,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
 			if on_ground==true then
@@ -436,7 +436,7 @@ function make_car(p)
 			angularv*=0.86
 			-- v_scale(velocity,0.97)
 			-- some friction
-			v_add(velocity,velocity,-0.1*v_dot(velocity,velocity))
+			v_add(velocity,velocity,-0.05*v_dot(velocity,velocity))
 		end,
 		integrate=function(self)
 		 	-- update pos & orientation
@@ -543,7 +543,7 @@ function make_snowball(pos)
 		if smoke_ttl<0 then
 			local pos={rnd(2)-1,rnd(2)-1,rnd(2)-1}
 			v_add(pos,self.pos)
-			add(actors,make_smoke(pos))
+			-- add(actors,make_smoke(pos))
 			smoke_ttl=10
 		end
 		-- physic update
@@ -659,6 +659,9 @@ function menu_state()
 
 	-- reset cam	
 	cam=make_cam()
+
+	-- reset rotated sprites
+	reload()
 
 	return {
 		-- draw
@@ -779,6 +782,7 @@ function play_state()
 	-- sprites
 	local rot_sprites={
 		make_rspr(112,16,32,0),
+		make_rspr(48,16,32,0),
 		make_rspr(48,0,32,0)}
 
 	return {
@@ -809,13 +813,15 @@ function play_state()
 			draw_drawables(out)
 			 
 			local cpu=flr(10000*stat(1))/100
-			print(cpu.."%",2,2,2)
+			print(cpu.."%\n"..stat(0),2,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
 
 				spr(9,34+3*cos(time()/4),128-14-14*steering+4*sin(time()/5),4,4)
 				spr(9,74-2*cos(time()/5),128-14+14*steering+4*sin(time()/4),4,4,true)
+
+				print(plyr.friction,2,16,2)
 			end
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
@@ -890,6 +896,7 @@ function plyr_death_state(snowball,pos)
 end
 
 function _init()
+	-- todo: remove (only for benchmarks)
 	srand(12)
 
 	-- white out ramp
@@ -988,14 +995,58 @@ end
 -- generate ski tracks
 function make_tracks(xmin,xmax,max_tracks)
 	local seeds={}
-	local function add_seed(x,u)
-	 local angle=0.05+rnd(0.45)
-	 add(seeds,{
-	 	ttl=20,
-	 	x=x or xmin+rnd(xmax-xmin),
-	 	u=u or cos(angle),
-	 	fa=fa
-	 })
+	local function add_seed(x,u,branch)
+		-- trick types:
+		-- 0: slope
+		-- 1: hole
+		local ttl,trick_ttl,trick_type
+
+		local function reset_seed_timers()
+			ttl=12+rnd(20)
+			trick_ttl=4+rnd(4)
+			trick_type=flr(rnd(2))		
+		end
+
+		reset_seed_timers()
+
+	 	add(seeds,{
+			age=0,
+			h=0,
+	 		x=x or xmin+rnd(xmax-xmin),
+	 		u=u or cos(0.05+rnd(0.45)),
+		 	update=function(self)
+			 	if(self.dead) del(seeds,self) return
+				self.age+=1
+				trick_ttl-=1
+				ttl-=1
+				if branch and trick_ttl<0 then
+					if trick_type==0 then
+						self.h+=1.5
+					elseif trick_type==1 then
+						self.h=-4
+					end
+					-- not too high + ensure straight line
+					if(trick_ttl<-5) self.h=0 ttl=4+rnd(2)
+				end
+				if ttl<0 then
+					-- reset
+					reset_seed_timers()
+					self.u=cos(0.05+rnd(0.45))
+					-- offshoot?
+					if rnd()<0.5 and #seeds<max_tracks then
+						add_seed(self.x,-self.u,true)
+					end
+				end
+				self.x+=self.u
+				if self.x<xmin then
+					self.u=-self.u
+					self.x=xmin
+				elseif self.x>xmax then
+					self.u=-self.u
+					self.x=xmax
+				end
+		 	end
+	 	})
 	end
  	-- init
  	add_seed()
@@ -1003,35 +1054,15 @@ function make_tracks(xmin,xmax,max_tracks)
  	-- update function
  	return function()
 		for s in all(seeds) do
-			if s.dead then
-				del(seeds,s)
-			else
-				s.ttl-=1
-				if s.ttl<0 then
-					-- reset
-					s.ttl=12+rnd(20)
-					s.u=cos(0.05+rnd(0.45))
-					-- offshoot?
-					if rnd()<0.5 and #seeds<max_tracks then
-						add_seed(s.x)
-					end
-				end
-				s.x+=s.u
-				if s.x<xmin then
-					s.u=-s.u
-					s.x=xmin
-				elseif s.x>xmax then
-					s.u=-s.u
-					s.x=xmax
-				end
-			 end
+			s:update()
 		end
 		-- kill intersections
 		for i=1,#seeds do
 			local s0=seeds[i]
 			for j=i+1,#seeds do
 				local s1=seeds[j]
-				if flr(s0.x-s1.x)==0 then
+				-- don't kill new seeds
+				if s1.age>0 and flr(s0.x-s1.x)==0 then
 					s1.dead=true
 				end
 			end
@@ -1080,6 +1111,8 @@ function make_ground(delta_slope)
 	}
 
 	local slice_id=0
+	local tree_prop,border_pole,warning_pole={sx=112,sy=16},{sx=48,sy=0},{sx=48,sy=16}
+
 	local function make_slice(y)
 		slice_id+=1
 		-- generate tracks 
@@ -1090,30 +1123,34 @@ function make_ground(delta_slope)
 		for i=0,nx-1 do
 			h[i]=rnd(2*delta_slope)
 			-- tree
-			actors[i]=rnd()>0.6 and {sx=112,sy=16,r=2}
+			actors[i]=rnd()>0.6 and tree_prop
 		end
 
-		-- flatten track
-		for _,t in pairs(tracks) do
-			local i0,i1=flr(t.x-2),flr(t.x+2)
-			for i=i0,i1 do				
-				h[flr(i)]/=4
-				-- remove props from track
-				actors[flr(i)]=nil
-			end
-			-- track borders
-			if slice_id%2==0 then
-				actors[i0-1]={sx=48,sy=0}
-				actors[i1+1]={sx=48,sy=0}
-			end
-		end
-		
 		-- smoothing
 		for k=1,2 do
  			for i=0,nx-1 do
 				h[i]=(h[i]+h[(i+1)%nx])/2
 			end
 		end
+
+		-- flatten track
+		-- todo: pick up a free slot (eg inside a track)
+
+		for _,t in pairs(tracks) do
+			local i0,i1=flr(t.x-2),flr(t.x+2)
+			for i=i0,i1 do				
+				h[i]=t.h+h[i]/4
+				-- remove props from track
+				actors[i]=nil
+			end
+			-- track borders
+			if slice_id%2==0 then
+				local pole=t.h!=0 and warning_pole or border_pole
+				actors[i0-1]=pole
+				actors[i1+1]=pole
+			end
+		end
+		
 		return {
 			y=y,
 			h=h,
@@ -1567,17 +1604,17 @@ __gfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000002888898888a88882000000000000000000000053bb000000
 0000007777000000000000000000000000000000000000000000000000000000000000000000000028889a88888988820000000000000000000000b53d000000
 0000777777700000000000000000000000000000000000000000000000000000000000000000000288888888888a988200000000000000000000035bbbb00000
-000677777777000000000000000000000000000d600000000000000000000000000000000000000288888888888aa88200000000000000000000053bbbb00000
-00766777777700000000000000000000000000dd16000000000000000000000000000000000000028888888898888882000000000000000000000b533bb00000
-0076776777770000000000000000000060000ddd1160000d0000000000000000000000000000000288888889998888820000000000000000000035b5b33d0000
-00767777777700000000000000000000160dddd1111660d100000000000000000000000000000002888889aaaa88888200000000000000000000535bbbbb0000
-0067677667770000000000000000000011dddd111111161100000000000000000000000000000002888889a88a88888200000000000000000000b533bbbb0000
-006777767775000000000000000000001d1ddd1111111161000000000000000000000000000000028888888888988820000000000000000000035b5b333bb000
-006667667677000000000000000000001111d111111111110000000000000000000000000000000288888888888888200000000000000000000535b5bbb3d000
-00076766777000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000005535bbbbbb000
-00006666660000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000000000110000000
-00000000000000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000000000440000000
-00000000000000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000000000440000000
+000677777777000000000000000000000000000d600000000000000800000000000000000000000288888888888aa88200000000000000000000053bbbb00000
+00766777777700000000000000000000000000dd16000000000000888000000000000000000000028888888898888882000000000000000000000b533bb00000
+0076776777770000000000000000000060000ddd1160000d0000008a80000000000000000000000288888889998888820000000000000000000035b5b33d0000
+00767777777700000000000000000000160dddd1111660d10000088a880000000000000000000002888889aaaa88888200000000000000000000535bbbbb0000
+0067677667770000000000000000000011dddd111111161100000888880000000000000000000002888889a88a88888200000000000000000000b533bbbb0000
+006777767775000000000000000000001d1ddd11111111610000888a8880000000000000000000028888888888988820000000000000000000035b5b333bb000
+006667667677000000000000000000001111d111111111110000888888800000000000000000000288888888888888200000000000000000000535b5bbb3d000
+00076766777000000000000000000000111111111111111100000005000000000000000000000002888888888888882000000000000000000005535bbbbbb000
+00006666660000000000000000000000111111111111111100000006000000000000000000000002888888888888882000000000000000000000000110000000
+00000000000000000000000000000000111111111111111100000006000000000000000000000002888888888888882000000000000000000000000440000000
+00000000000000000000000000000000111111111111111100000016100000000000000000000002888888888888882000000000000000000000000440000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000888882000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000882000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000

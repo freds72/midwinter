@@ -297,7 +297,7 @@ function make_cam()
 			local m=make_m_from_v_angle(up,self.angle)
 			-- 1.8m player
 			-- v_add(pos,v_up,64)
-			v_add(pos,m_up(m),0.8)
+			v_add(pos,m_up(m),1.6)
 			
 			-- inverse view matrix
 			m_inv(m)
@@ -501,12 +501,14 @@ function make_car(p)
 	}	
 end
 
-function make_plyr(p)
+function make_plyr(p,hp)
 	local body=make_car(p)
 
 	local body_update=body.update
 
 	local jump_ttl=0 
+	local hit_ttl=0
+
 	body.control=function(self)	
 		local da=0
 		if(btn(0)) da=1
@@ -517,13 +519,27 @@ function make_plyr(p)
 	
 	body.update=function(self)
 		jump_ttl-=1
+		hit_ttl-=1
+
 		-- collision detection
-		if not self.dead and ground:collide(self.pos,0.2) then
-			self.dead=true
+		if hit_ttl<0 and ground:collide(self.pos,0.2) then
+			hp-=1
+			cam:shake(rnd(8),rnd(8),1)
+			--
+			hit_ttl=20
+			if hp==0 then
+				self.dead=true
+			end
 		end
 
 		-- call parent
 		body_update(self)
+	end
+
+	body.hit_points=function()
+		local lost_hp=0
+		if(hit_ttl>0 and hit_ttl%2==0) lost_hp=1
+		return hp+lost_hp
 	end
 
 	-- wrapper
@@ -771,15 +787,15 @@ function play_state()
 	ground=make_ground(1.8)
 
 	-- create player in correct direction
-	plyr=make_plyr({32,0,32},0)
+	plyr=make_plyr({32,0,32},3)
 
 	-- reset cam	
 	cam=make_cam()
 
 	-- sprites
 	local rot_sprites={
-		make_rspr(112,16,32,0),
-		make_rspr(48,0,32,0)}
+		make_rspr(112,16,64,0),
+		make_rspr(48,0,64,0)}
 
 	return {
 		-- draw
@@ -809,14 +825,42 @@ function play_state()
 			draw_drawables(out)
 			 
 			local cpu=flr(10000*stat(1))/100
-			print(cpu.."%",2,2,2)
+			-- print(cpu.."%",2,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
 
 				spr(9,34+3*cos(time()/4),128-14-14*steering+4*sin(time()/5),4,4)
 				spr(9,74-2*cos(time()/5),128-14+14*steering+4*sin(time()/4),4,4,true)
+			
+				-- difficulty levels = less hearts!
+				-- ♥
+				local s=""
+				for i=1,plyr:hit_points() do
+					s=s.."♥"
+				end
+				local x0=2
+				for i=-1,1 do
+					for j=-2,1 do
+						print(s,x0+i,4+j,1)
+					end
+				end
+				print(s,x0,4,5)
+				print(s,x0,4-1,7)
+			
 			end
+
+			-- score
+			local s=tostr(flr(time()*4))
+			s=sub("000000000",1,9-#s)..s
+			local x0=64-#s*2
+			for i=-1,1 do
+				for j=-2,1 do
+					print(s,x0+i,4+j,1)
+				end
+			end
+			print(s,x0,4,3)
+			print(s,x0,4-1,11)
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
@@ -939,7 +983,8 @@ function draw_sprite(actor,x,y,w,dist)
 	elseif dist>7 then
 		memcpy(0x5f00,0x4300,16)
 	end
-	sspr(actor.sx,actor.sy,16,16,x-w/2,y-w,w,w)
+	w=actor.w or w
+	sspr(actor.sx,actor.sy,16,16,x-w/2,actor.y or y-w,w,w)
 	pal()
 end
 
@@ -1081,10 +1126,9 @@ function make_ground(delta_slope)
 
 	local slice_id=0
 	local function make_slice(y)
-		slice_id+=1
 		-- generate tracks 
 		local tracks=next_tracks()
-
+		
 		-- height array + props array
 		local h,actors={},{}
 		for i=0,nx-1 do
@@ -1094,12 +1138,17 @@ function make_ground(delta_slope)
 		end
 
 		-- flatten track
+		local new_tracks={}
 		for _,t in pairs(tracks) do
 			local i0,i1=flr(t.x-2),flr(t.x+2)
 			for i=i0,i1 do				
 				h[flr(i)]/=4
 				-- remove props from track
 				actors[flr(i)]=nil
+			end
+			-- track entry sign
+			if t.ttl>18 then
+				actors[flr(t.x)]={sx=48,sy=16,w=16,y=12}
 			end
 			-- track borders
 			if slice_id%2==0 then
@@ -1114,6 +1163,8 @@ function make_ground(delta_slope)
 				h[i]=(h[i]+h[(i+1)%nx])/2
 			end
 		end
+
+		slice_id+=1
 		return {
 			y=y,
 			h=h,
@@ -1567,12 +1618,12 @@ __gfx__
 000000000000000000000000000000000000000000000000000000000000000000000000000000002888898888a88882000000000000000000000053bb000000
 0000007777000000000000000000000000000000000000000000000000000000000000000000000028889a88888988820000000000000000000000b53d000000
 0000777777700000000000000000000000000000000000000000000000000000000000000000000288888888888a988200000000000000000000035bbbb00000
-000677777777000000000000000000000000000d600000000000000000000000000000000000000288888888888aa88200000000000000000000053bbbb00000
-00766777777700000000000000000000000000dd16000000000000000000000000000000000000028888888898888882000000000000000000000b533bb00000
-0076776777770000000000000000000060000ddd1160000d0000000000000000000000000000000288888889998888820000000000000000000035b5b33d0000
-00767777777700000000000000000000160dddd1111660d100000000000000000000000000000002888889aaaa88888200000000000000000000535bbbbb0000
-0067677667770000000000000000000011dddd111111161100000000000000000000000000000002888889a88a88888200000000000000000000b533bbbb0000
-006777767775000000000000000000001d1ddd1111111161000000000000000000000000000000028888888888988820000000000000000000035b5b333bb000
+000677777777000000000000000000000000000d600000000000011111100000000000000000000288888888888aa88200000000000000000000053bbbb00000
+00766777777700000000000000000000000000dd16000000000001aaaa10000000000000000000028888888898888882000000000000000000000b533bb00000
+0076776777770000000000000000000060000ddd1160000d000001aaaa100000000000000000000288888889998888820000000000000000000035b5b33d0000
+00767777777700000000000000000000160dddd1111660d10000019aa91000000000000000000002888889aaaa88888200000000000000000000535bbbbb0000
+0067677667770000000000000000000011dddd111111161100000019910000000000000000000002888889a88a88888200000000000000000000b533bbbb0000
+006777767775000000000000000000001d1ddd1111111161000000011000000000000000000000028888888888988820000000000000000000035b5b333bb000
 006667667677000000000000000000001111d111111111110000000000000000000000000000000288888888888888200000000000000000000535b5bbb3d000
 00076766777000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000005535bbbbbb000
 00006666660000000000000000000000111111111111111100000000000000000000000000000002888888888888882000000000000000000000000110000000

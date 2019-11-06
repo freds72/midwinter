@@ -525,7 +525,7 @@ function make_plyr(p,hp)
 		if hit_ttl<0 and ground:collide(self.pos,0.2) then
 			hp-=1
 			cam:shake(rnd(8),rnd(8),1)
-			--
+			-- temporary invincibility
 			hit_ttl=20
 			if hp==0 then
 				self.dead=true

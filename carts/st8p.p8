@@ -52,11 +52,6 @@ function v_normz(v)
 	v[2]/=d
 	v[3]/=d
 end
-function v_cross(a,b)
-	local ax,ay,az=a[1],a[2],a[3]
-	local bx,by,bz=b[1],b[2],b[3]
-	return {ay*bz-az*by,az*bx-ax*bz,ax*by-ay*bx}
-end
 
 function v_lerp(a,b,t)
 	return {
@@ -104,19 +99,6 @@ function m_clone(m)
 		c[k]=v
 	end
 	return c
-end
-function make_m_from_euler(x,y,z)
-		local a,b = cos(x),-sin(x)
-		local c,d = cos(y),-sin(y)
-		local e,f = cos(z),-sin(z)
-  
-  -- yxz order
-  local ce,cf,de,df=c*e,c*f,d*e,d*f
-	 return {
-	  ce+df*b,a*f,cf*b-de,0,
-	  de*b-cf,a*e,df+ce*b,0,
-	  a*d,-b,a*c,0,
-	  0,0,0,1}
 end
 function make_m_from_v_angle(up,angle)
 	local fwd={-sin(angle),0,cos(angle)}
@@ -404,7 +386,7 @@ function make_car(p)
 			return make_m_from_v_angle(oldf and oldf.n or v_up,angle)
 		end,
 		get_up=function()
-			return up
+			return v_lerp(v_up,up,abs(cos(angle)))
 		end,
 		-- contact face
 		get_ground=function()
@@ -418,7 +400,7 @@ function make_car(p)
 		end,
 		prepare=function(self)
 			-- gravity and ground
-			local g={0,-2,0}
+			local g={0,-4,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
 			if on_ground==true then
@@ -462,7 +444,7 @@ function make_car(p)
 				if abs(sa)>0.001 then
 					-- max grip
 					-- todo: review
-					sa=mid(sa,-0.1,0.1)
+					-- sa=mid(sa,-0.5,0.5)
 				
 					-- ski length for torque
 					local ski_len=0.8
@@ -475,10 +457,9 @@ function make_car(p)
 
 					v_scale(right,30*sa)
 
-					self:apply_force_and_torque(right,-steering_angle*ski_len/2)
+					self:apply_force_and_torque(right,-steering_angle*ski_len)				
 				end
-			end
-			self.friction=on_ground==true and "ground" or "air"
+			end			
 		end,
 		update=function(self)
 			steering_angle*=0.8
@@ -1123,7 +1104,7 @@ function make_ground(delta_slope)
 		for i=0,nx-1 do
 			h[i]=rnd(2*delta_slope)
 			-- tree
-			actors[i]=rnd()>0.6 and tree_prop
+			actors[i]=rnd()>0.6 and {sx=112,sy=16}
 		end
 
 		-- smoothing
@@ -1472,7 +1453,79 @@ function make_rspr(sx,sy,n,tc)
 		end
 	end
 end
-   
+-->8
+-- infinite number
+function make_big_number()
+	-- each segment: 0-99
+	local segments={}
+	return {
+		add=function(self,v)
+			local i,carry=1,0
+			v=flr(v)
+			while bor(v,carry)!=0 do
+				local inc=v%100
+				assert(i<10,"number too big: "..i)
+				local n=segments[i] or 0
+				n+=inc+carry
+				carry=0
+				if n>99 then
+				 carry=flr(n/100)
+				 n-=100
+				end
+				segments[i],v=n,flr(v/100)
+				i+=1
+			end
+		end,
+		tostr=function(self,sep)
+			local s=""
+			for i=#segments,1,-1 do
+				local n=tostr(segments[i])
+				s=s..sub("00",1,2-#n)..n
+			end
+			-- padding
+			-- s=sub("0000000000000000",1,20-#s)..s
+			-- separator?
+			if sep then
+				local tmp=""
+				for i=1,#s,3 do
+					tmp=sub(s,i,i+2)..sep
+				end
+				s=tmp
+			end
+			return s
+		end,
+		save=function(self,slot)
+			dset(slot,#segments)
+			for i,v in pairs(segments) do
+				dset(slot+i,v)
+			end
+		end,
+		load=function(self,slot)
+			local len=dget(slot)
+			slot+=1
+			for i=1,len do
+				add(segments,dget(slot))
+				slot+=1
+			end
+			return slot
+		end,
+		segments=segments,
+		-- true if self>b
+		gt=function(a,b)
+			local alen,blen=#a.segments,#b.segments
+			if alen==blen then
+				for i=alen,1,-1 do
+					if (a.segments[i]>b.segments[i]) return true
+				end
+				return false
+			elseif alen>blen then
+				return true
+			end
+			return false
+		end
+	}
+end
+
 -->8
 -- trifill & clipping
 -- by @p01

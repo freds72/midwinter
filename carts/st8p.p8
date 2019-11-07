@@ -65,10 +65,6 @@ function v_cross(a,b)
 	local bx,by,bz=b[1],b[2],b[3]
 	return {ay*bz-az*by,az*bx-ax*bz,ax*by-ay*bx}
 end
--- x/z orthogonal vector
-function v2_ortho(a,scale)
-	return {-scale*a[1],0,scale*a[3]}
-end
 
 local v_up={0,1,0}
 
@@ -92,13 +88,6 @@ function m_x_m(a,b)
 			a11*b13+a12*b23+a13*b33,a21*b13+a22*b23+a23*b33,a31*b13+a32*b23+a33*b33,0,
 			a11*b14+a12*b24+a13*b34+a14,a21*b14+a22*b24+a23*b34+a24,a31*b14+a32*b24+a33*b34+a34,1
 		}
-end
-function m_clone(m)
-	local c={}
-	for k,v in pairs(m) do
-		c[k]=v
-	end
-	return c
 end
 function make_m_from_v_angle(up,angle)
 	local fwd={-sin(angle),0,cos(angle)}
@@ -137,6 +126,18 @@ function m_up(m)
 end
 function m_fwd(m)
 	return {m[9],m[10],m[11]}
+end
+
+-- print helper
+function printb(s,x,y,cf,cs,cb)
+	x=x or 64-#s*2
+	for i=-1,1 do
+		for j=-2,1 do
+			print(s,x+i,y+j,cb)
+		end
+	end
+	print(s,x,y,cs)
+	print(s,x,y-1,cf)
 end
 
 -- coroutine helper
@@ -369,7 +370,7 @@ end
 -- "physic body" for simple car
 function make_car(p)
 	-- last contact face
-	local up,on_ground,oldf={0,1,0},false
+	local up,oldf={0,1,0}
 
 	local velocity,angularv={0,0,0},0
 	local forces,torque={0,0,0},0
@@ -378,19 +379,15 @@ function make_car(p)
 
 	return {
 		pos=v_clone(p),
+		on_ground=false,
 		get_pos=function(self)
 	 		return self.pos,angle,steering_angle/0.625
-		end,
-		get_orient=function()
-			-- todo: lean left/right according to steering
-			return make_m_from_v_angle(oldf and oldf.n or v_up,angle)
 		end,
 		get_up=function()
 			return v_lerp(v_up,up,abs(cos(angle)))
 		end,
-		-- contact face
-		get_ground=function()
-			return oldf
+		get_velocity=function()
+			return velocity
 		end,
 		apply_force_and_torque=function(self,f,t)
 			-- add(debug_vectors,{f=f,p=p,c=11,scale=t})
@@ -403,7 +400,7 @@ function make_car(p)
 			local g={0,-4,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
-			if on_ground==true then
+			if self.on_ground==true then
 				local n=v_clone(up)
 				v_scale(n,-v_dot(n,g))
 				-- slope pushing up
@@ -431,9 +428,9 @@ function make_car(p)
 			forces,torque={0,0,0},0
 		end,
 		steer=function(self,steering_dt)
+			steering_angle+=mid(steering_dt,-0.15,0.15)
 			-- on ground?
-			if on_ground==true and v_len(velocity)>0.001 then
-				steering_angle+=mid(steering_dt,-0.15,0.15)
+			if self.on_ground==true and v_len(velocity)>0.001 then
 
 				-- desired ski direction
 				local m=make_m_from_v_angle(up,angle-steering_angle/16)
@@ -459,6 +456,8 @@ function make_car(p)
 
 					self:apply_force_and_torque(right,-steering_angle*ski_len/4)				
 				end
+			elseif self.on_ground==false then
+				self:apply_force_and_torque({0,0,0},-steering_angle)
 			end			
 		end,
 		update=function(self)
@@ -472,11 +471,11 @@ function make_car(p)
 				oldf=newf
 			end
 			-- stop at ground
-			on_ground=false
+			self.on_ground=false
 			if newpos and pos[2]<=newpos[2] then
 				up=newf.n			
 				pos[2]=newpos[2]
-				on_ground=true
+				self.on_ground=true
 			end
 		end
 	}	
@@ -489,17 +488,30 @@ function make_plyr(p,hp)
 
 	local jump_ttl=0 
 	local hit_ttl=0
+	local jump_pressed
 
 	body.control=function(self)	
 		local da=0
 		if(btn(0)) da=1
 		if(btn(1)) da=-1
+		local do_jump
+		if self.on_ground==true and btn(4) then
+			if(not jump_ttl) jump_pressed,jump_ttl=true,0
+			jump_ttl+=1
+		elseif jump_pressed then
+			-- button released?
+			do_jump=true
+		end
+
+		if do_jump or jump_ttl>9 then
+			self:apply_force_and_torque({0,jump_ttl*9,0},0)
+			jump_ttl,jump_pressed,do_jump=0
+		end
 
 		self:steer(da/8)
 	end
 	
 	body.update=function(self)
-		jump_ttl-=1
 		hit_ttl-=1
 
 		-- collision detection
@@ -532,17 +544,10 @@ function make_snowball(pos)
 	
 	local body_update=body.update
 
-	local smoke_ttl=0
 	body.sx=112
 	body.sy=0
 	body.update=function(self)		
-		smoke_ttl-=1
-		if smoke_ttl<0 then
-			local pos={rnd(2)-1,rnd(2)-1,rnd(2)-1}
-			v_add(pos,self.pos)
-			-- add(actors,make_smoke(pos))
-			smoke_ttl=10
-		end
+
 		-- physic update
 		self:prepare()
 		self:integrate()
@@ -551,20 +556,6 @@ function make_snowball(pos)
 		return true
 	end
 	return body
-end
-
-function make_smoke(pos)
-	local ttl=20+rnd(10)
-	return {
-		sx=0,sy=16,
-		pos=v_clone(pos),
-		update=function(self)
-			ttl-=1
-			if(ttl<0) return
-			self.pos[2]+=0.2
-			return true
-		end
-	}
 end
 
 -- game states
@@ -776,6 +767,8 @@ function play_state()
 	-- reset cam	
 	cam=make_cam()
 
+	local score,score_acc=make_big_number(),0
+
 	-- sprites
 	local rot_sprites={
 		make_rspr(112,16,32,0),
@@ -824,28 +817,17 @@ function play_state()
 				for i=1,plyr:hit_points() do
 					s=s.."♥"
 				end
-				local x0=2
-				for i=-1,1 do
-					for j=-2,1 do
-						print(s,x0+i,4+j,1)
-					end
-				end
-				print(s,x0,4,5)
-				print(s,x0,4-1,7)
-			
+				printb(s,2,4,7,5,1)
+
+				local dz=plyr:get_velocity()[3]
+				score_acc+=(dz>0 and dz or 0)
+				score:add(score_acc)
+				score_acc-=flr(score_acc)
 			end
 
 			-- score
-			local s=tostr(flr(time()*4))
-			s=sub("000000000",1,9-#s)..s
-			local x0=64-#s*2
-			for i=-1,1 do
-				for j=-2,1 do
-					print(s,x0+i,4+j,1)
-				end
-			end
-			print(s,x0,4,3)
-			print(s,x0,4-1,11)
+			local s=score:tostr()
+			printb(s,nil,4,12,1,7)
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
@@ -1500,6 +1482,7 @@ function make_rspr(sx,sy,n,tc)
 		end
 	end
 end
+
 -->8
 -- infinite number
 function make_big_number()

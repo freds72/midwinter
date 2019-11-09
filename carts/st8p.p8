@@ -515,7 +515,12 @@ function make_plyr(p,hp)
 		hit_ttl-=1
 
 		-- collision detection
-		if hit_ttl<0 and ground:collide(self.pos,0.2) then
+		local hit_type=ground:collide(self.pos,0.2)
+		if hit_type==2 then
+			-- insta-death
+			cam:shake(rnd(8),rnd(8),1)
+			self.dead=true
+		elseif hit_ttl<0 and hit_type==1 then
 			hp-=1
 			cam:shake(rnd(8),rnd(8),1)
 			-- temporary invincibility
@@ -762,7 +767,7 @@ function play_state()
 	ground=make_ground(1.8)
 
 	-- create player in correct direction
-	plyr=make_plyr({32,0,32},3)
+	plyr=make_plyr(ground.plyr_pos,3)
 
 	-- reset cam	
 	cam=make_cam()
@@ -902,7 +907,7 @@ end
 
 function _init()
 	-- todo: remove (only for benchmarks)
-	srand(12)
+	-- srand(12)
 
 	-- white out ramp
 	for i=0,15 do
@@ -964,19 +969,16 @@ function draw_drawables(objects)
 		else
 			-- triangle
 			local c0=0x76
-			if false then --d.f.n[2]<0.6 then
+			if d.f.m==1 then
+				-- dirt
 				c0=0x54
 				if(d.dist>7) c0=0x4d
 				if(d.dist>8) c0=0xd5
-				local c=5*d.f.n[2]
-				local cf=(#dither_pat-1)*(1-c%1)
-				fillp(dither_pat[flr(cf)+1])
+				fillp(d.f.cf)
 			else
 				if(d.dist>7) c0=0x6d
 				if(d.dist>8) c0=0xd5
-				local c=5*d.f.n[2]
-				local cf=(#dither_pat-1)*(1-c%1)
-				fillp(dither_pat[flr(cf)+1])
+				fillp(d.f.cf)
 			end
 			cam:project_poly(d.v,c0)
 			fillp()
@@ -1015,7 +1017,7 @@ function make_tracks(xmin,xmax,max_tracks)
 
 		reset_seed_timers()
 
-	 	add(seeds,{
+	 	return add(seeds,{
 			age=0,
 			h=0,
 	 		x=x or xmin+rnd(xmax-xmin),
@@ -1055,7 +1057,7 @@ function make_tracks(xmin,xmax,max_tracks)
 	 	})
 	end
  	-- init
- 	add_seed()
+ 	add_seed().main=true
 
  	-- update function
  	return function()
@@ -1068,7 +1070,8 @@ function make_tracks(xmin,xmax,max_tracks)
 			for j=i+1,#seeds do
 				local s1=seeds[j]
 				-- don't kill new seeds
-				if s1.age>0 and flr(s0.x-s1.x)==0 then
+				-- don't kill main track
+				if s1.age>0 and flr(s0.x-s1.x)==0 and not s1.main then
 					s1.dead=true
 				end
 			end
@@ -1130,7 +1133,7 @@ function make_ground(delta_slope)
 			-- tree
 			actors[i]=rnd()>0.6 and {sx=112,sy=16}
 		end
-
+			
 		-- smoothing
 		for k=1,2 do
  			for i=0,nx-1 do
@@ -1138,10 +1141,13 @@ function make_ground(delta_slope)
 			end
 		end
 
-		-- flatten track
-		-- todo: pick up a free slot (eg inside a track)
+		h[0]=15+rnd(5)
+		h[nx-1]=15+rnd(5)
 
+		-- flatten track
+		local main_track_x
 		for _,t in pairs(tracks) do
+			if(t.main) main_track_x=t.x
 			local i0,i1=flr(t.x-2),flr(t.x+2)
 			for i=i0,i1 do				
 				h[i]=t.h+h[i]/4
@@ -1164,12 +1170,26 @@ function make_ground(delta_slope)
 		return {
 			y=y,
 			h=h,
+			track_x=main_track_x,
 			actors=actors
 		}
 	end
 
 	local function mesh(j)
 		local s0,s1=slices[j],slices[j+1]
+		-- base slope normal
+		local sn={0,dz,s0.y-s1.y} 
+		v_normz(sn)
+		local function with_material(f,i)
+			local c=5*f.n[2]
+			local cf=(#dither_pat-1)*(1-c%1)
+			f.cf=dither_pat[flr(cf)+1]
+
+			if(i==0 or i==nx-2) f.m=0 return f
+			f.m=v_dot(sn,f.n)<0.8 and 1 or 0
+			return f
+		end
+ 	
 		local f,actor={}
 		local fi=0
 		for i=0,nx-2 do
@@ -1189,17 +1209,21 @@ function make_ground(delta_slope)
 			local v=n1
 			if v_dot(n0,n1)>0.995 then
 				-- quad
-				f[fi]={n=n0}
+				-- material:
+				-- 0: snow
+				-- 1: dirt
+				f[fi]=with_material({n=n0},i)
 			else
 				-- 2 tri
-				f[fi]={n=n0}
-				f[fi+1]={n=n1}
+				f[fi]=with_material({n=n0},i)
+				f[fi+1]=with_material({n=n1},i)
 			end
 
 			-- actor position (if any)
-			local u,t=v_clone(u2),rnd(0.5)
-			v_scale(u,t)
-			v_add(u,u3,0.5-t)
+			local u,t0,t1=v_clone(u2),rnd(),rnd()
+			v_scale(u,t0)
+			v_add(u,u3,t1)
+			v_scale(u,1/(rnd()+t0+t1))
 			if(s0.actors[i]) s0.actors[i].u=u
 
 			fi+=2
@@ -1309,7 +1333,9 @@ function make_ground(delta_slope)
 		return tiles	
 	end
 
+	local plyr_z_index=flr(nz/2)-1
 	return {
+		plyr_pos={dx*slices[plyr_z_index].track_x,10,plyr_z_index*dz},
 		to_tile_coords=function(self,v)
 			return flr(v[1]/dx),flr(v[3]/dz)
 		end,
@@ -1385,6 +1411,7 @@ function make_ground(delta_slope)
 		-- find all actors within a given radius from given position
 		collide=function(self,p,r)
 			local i0,j0=self:to_tile_coords(p)
+			if (i0==0 or i0==nx-2) return 2
 			
 			-- square radius
 			r*=r
@@ -1402,7 +1429,7 @@ function make_ground(delta_slope)
 							v_add(v0,actor.u)
 							local d=make_v(p,v0)
 							if v_dot(d,d)<r+actor.r*actor.r then
-								return true
+								return 1
 							end
 						end
 					end

@@ -65,10 +65,6 @@ function v_cross(a,b)
 	local bx,by,bz=b[1],b[2],b[3]
 	return {ay*bz-az*by,az*bx-ax*bz,ax*by-ay*bx}
 end
--- x/z orthogonal vector
-function v2_ortho(a,scale)
-	return {-scale*a[1],0,scale*a[3]}
-end
 
 local v_up={0,1,0}
 
@@ -92,13 +88,6 @@ function m_x_m(a,b)
 			a11*b13+a12*b23+a13*b33,a21*b13+a22*b23+a23*b33,a31*b13+a32*b23+a33*b33,0,
 			a11*b14+a12*b24+a13*b34+a14,a21*b14+a22*b24+a23*b34+a24,a31*b14+a32*b24+a33*b34+a34,1
 		}
-end
-function m_clone(m)
-	local c={}
-	for k,v in pairs(m) do
-		c[k]=v
-	end
-	return c
 end
 function make_m_from_v_angle(up,angle)
 	local fwd={-sin(angle),0,cos(angle)}
@@ -137,6 +126,18 @@ function m_up(m)
 end
 function m_fwd(m)
 	return {m[9],m[10],m[11]}
+end
+
+-- print helper
+function printb(s,x,y,cf,cs,cb)
+	x=x or 64-#s*2
+	for i=-1,1 do
+		for j=-2,1 do
+			print(s,x+i,y+j,cb)
+		end
+	end
+	print(s,x,y,cs)
+	print(s,x,y-1,cf)
 end
 
 -- coroutine helper
@@ -369,7 +370,7 @@ end
 -- "physic body" for simple car
 function make_car(p)
 	-- last contact face
-	local up,on_ground,oldf={0,1,0},false
+	local up,oldf={0,1,0}
 
 	local velocity,angularv={0,0,0},0
 	local forces,torque={0,0,0},0
@@ -378,19 +379,15 @@ function make_car(p)
 
 	return {
 		pos=v_clone(p),
+		on_ground=false,
 		get_pos=function(self)
 	 		return self.pos,angle,steering_angle/0.625
-		end,
-		get_orient=function()
-			-- todo: lean left/right according to steering
-			return make_m_from_v_angle(oldf and oldf.n or v_up,angle)
 		end,
 		get_up=function()
 			return v_lerp(v_up,up,abs(cos(angle)))
 		end,
-		-- contact face
-		get_ground=function()
-			return oldf
+		get_velocity=function()
+			return velocity
 		end,
 		apply_force_and_torque=function(self,f,t)
 			-- add(debug_vectors,{f=f,p=p,c=11,scale=t})
@@ -403,7 +400,7 @@ function make_car(p)
 			local g={0,-4,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
-			if on_ground==true then
+			if self.on_ground==true then
 				local n=v_clone(up)
 				v_scale(n,-v_dot(n,g))
 				-- slope pushing up
@@ -431,9 +428,9 @@ function make_car(p)
 			forces,torque={0,0,0},0
 		end,
 		steer=function(self,steering_dt)
+			steering_angle+=mid(steering_dt,-0.15,0.15)
 			-- on ground?
-			if on_ground==true and v_len(velocity)>0.001 then
-				steering_angle+=mid(steering_dt,-0.15,0.15)
+			if self.on_ground==true and v_len(velocity)>0.001 then
 
 				-- desired ski direction
 				local m=make_m_from_v_angle(up,angle-steering_angle/16)
@@ -459,6 +456,8 @@ function make_car(p)
 
 					self:apply_force_and_torque(right,-steering_angle*ski_len/4)				
 				end
+			elseif self.on_ground==false then
+				self:apply_force_and_torque({0,0,0},-steering_angle)
 			end			
 		end,
 		update=function(self)
@@ -472,11 +471,11 @@ function make_car(p)
 				oldf=newf
 			end
 			-- stop at ground
-			on_ground=false
+			self.on_ground=false
 			if newpos and pos[2]<=newpos[2] then
 				up=newf.n			
 				pos[2]=newpos[2]
-				on_ground=true
+				self.on_ground=true
 			end
 		end
 	}	
@@ -489,21 +488,39 @@ function make_plyr(p,hp)
 
 	local jump_ttl=0 
 	local hit_ttl=0
+	local jump_pressed
 
 	body.control=function(self)	
 		local da=0
 		if(btn(0)) da=1
 		if(btn(1)) da=-1
+		local do_jump
+		if self.on_ground==true and btn(4) then
+			if(not jump_ttl) jump_pressed,jump_ttl=true,0
+			jump_ttl+=1
+		elseif jump_pressed then
+			-- button released?
+			do_jump=true
+		end
+
+		if do_jump or jump_ttl>9 then
+			self:apply_force_and_torque({0,jump_ttl*9,0},0)
+			jump_ttl,jump_pressed,do_jump=0
+		end
 
 		self:steer(da/8)
 	end
 	
 	body.update=function(self)
-		jump_ttl-=1
 		hit_ttl-=1
 
 		-- collision detection
-		if hit_ttl<0 and ground:collide(self.pos,0.2) then
+		local hit_type=ground:collide(self.pos,0.2)
+		if hit_type==2 then
+			-- insta-death
+			cam:shake(rnd(8),rnd(8),1)
+			self.dead=true
+		elseif hit_ttl<0 and hit_type==1 then
 			hp-=1
 			cam:shake(rnd(8),rnd(8),1)
 			-- temporary invincibility
@@ -532,17 +549,10 @@ function make_snowball(pos)
 	
 	local body_update=body.update
 
-	local smoke_ttl=0
 	body.sx=112
 	body.sy=0
 	body.update=function(self)		
-		smoke_ttl-=1
-		if smoke_ttl<0 then
-			local pos={rnd(2)-1,rnd(2)-1,rnd(2)-1}
-			v_add(pos,self.pos)
-			-- add(actors,make_smoke(pos))
-			smoke_ttl=10
-		end
+
 		-- physic update
 		self:prepare()
 		self:integrate()
@@ -551,20 +561,6 @@ function make_snowball(pos)
 		return true
 	end
 	return body
-end
-
-function make_smoke(pos)
-	local ttl=20+rnd(10)
-	return {
-		sx=0,sy=16,
-		pos=v_clone(pos),
-		update=function(self)
-			ttl-=1
-			if(ttl<0) return
-			self.pos[2]+=0.2
-			return true
-		end
-	}
 end
 
 -- game states
@@ -771,10 +767,12 @@ function play_state()
 	ground=make_ground(1.8)
 
 	-- create player in correct direction
-	plyr=make_plyr({32,0,32},3)
+	plyr=make_plyr(ground.plyr_pos,3)
 
 	-- reset cam	
 	cam=make_cam()
+
+	local score,score_acc=make_big_number(),0
 
 	-- sprites
 	local rot_sprites={
@@ -824,28 +822,17 @@ function play_state()
 				for i=1,plyr:hit_points() do
 					s=s.."♥"
 				end
-				local x0=2
-				for i=-1,1 do
-					for j=-2,1 do
-						print(s,x0+i,4+j,1)
-					end
-				end
-				print(s,x0,4,5)
-				print(s,x0,4-1,7)
-			
+				printb(s,2,4,7,5,1)
+
+				local dz=plyr:get_velocity()[3]
+				score_acc+=(dz>0 and dz or 0)
+				score:add(score_acc)
+				score_acc-=flr(score_acc)
 			end
 
 			-- score
-			local s=tostr(flr(time()*4))
-			s=sub("000000000",1,9-#s)..s
-			local x0=64-#s*2
-			for i=-1,1 do
-				for j=-2,1 do
-					print(s,x0+i,4+j,1)
-				end
-			end
-			print(s,x0,4,3)
-			print(s,x0,4-1,11)
+			local s=score:tostr()
+			printb(s,nil,4,12,1,7)
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
@@ -925,7 +912,7 @@ end
 
 function _init()
 	-- todo: remove (only for benchmarks)
-	srand(12)
+	-- srand(12)
 
 	-- white out ramp
 	for i=0,15 do
@@ -987,19 +974,16 @@ function draw_drawables(objects)
 		else
 			-- triangle
 			local c0=0x76
-			if false then --d.f.n[2]<0.6 then
+			if d.f.m==1 then
+				-- dirt
 				c0=0x54
 				if(d.dist>7) c0=0x4d
 				if(d.dist>8) c0=0xd5
-				local c=5*d.f.n[2]
-				local cf=(#dither_pat-1)*(1-c%1)
-				fillp(dither_pat[flr(cf)+1])
+				fillp(d.f.cf)
 			else
 				if(d.dist>7) c0=0x6d
 				if(d.dist>8) c0=0xd5
-				local c=5*d.f.n[2]
-				local cf=(#dither_pat-1)*(1-c%1)
-				fillp(dither_pat[flr(cf)+1])
+				fillp(d.f.cf)
 			end
 			cam:project_poly(d.v,c0)
 			fillp()
@@ -1038,7 +1022,7 @@ function make_tracks(xmin,xmax,max_tracks)
 
 		reset_seed_timers()
 
-	 	add(seeds,{
+	 	return add(seeds,{
 			age=0,
 			h=0,
 	 		x=x or xmin+rnd(xmax-xmin),
@@ -1078,7 +1062,7 @@ function make_tracks(xmin,xmax,max_tracks)
 	 	})
 	end
  	-- init
- 	add_seed()
+ 	add_seed().main=true
 
  	-- update function
  	return function()
@@ -1091,7 +1075,8 @@ function make_tracks(xmin,xmax,max_tracks)
 			for j=i+1,#seeds do
 				local s1=seeds[j]
 				-- don't kill new seeds
-				if s1.age>0 and flr(s0.x-s1.x)==0 then
+				-- don't kill main track
+				if s1.age>0 and flr(s0.x-s1.x)==0 and not s1.main then
 					s1.dead=true
 				end
 			end
@@ -1153,7 +1138,7 @@ function make_ground(delta_slope)
 			-- tree
 			actors[i]=rnd()>0.6 and {sx=112,sy=16}
 		end
-
+			
 		-- smoothing
 		for k=1,2 do
  			for i=0,nx-1 do
@@ -1161,10 +1146,13 @@ function make_ground(delta_slope)
 			end
 		end
 
-		-- flatten track
-		-- todo: pick up a free slot (eg inside a track)
+		h[0]=15+rnd(5)
+		h[nx-1]=15+rnd(5)
 
+		-- flatten track
+		local main_track_x
 		for _,t in pairs(tracks) do
+			if(t.main) main_track_x=t.x
 			local i0,i1=flr(t.x-2),flr(t.x+2)
 			for i=i0,i1 do				
 				h[i]=t.h+h[i]/4
@@ -1187,12 +1175,26 @@ function make_ground(delta_slope)
 		return {
 			y=y,
 			h=h,
+			track_x=main_track_x,
 			actors=actors
 		}
 	end
 
 	local function mesh(j)
 		local s0,s1=slices[j],slices[j+1]
+		-- base slope normal
+		local sn={0,dz,s0.y-s1.y} 
+		v_normz(sn)
+		local function with_material(f,i)
+			local c=5*f.n[2]
+			local cf=(#dither_pat-1)*(1-c%1)
+			f.cf=dither_pat[flr(cf)+1]
+
+			if(i==0 or i==nx-2) f.m=0 return f
+			f.m=v_dot(sn,f.n)<0.8 and 1 or 0
+			return f
+		end
+ 	
 		local f,actor={}
 		local fi=0
 		for i=0,nx-2 do
@@ -1212,17 +1214,21 @@ function make_ground(delta_slope)
 			local v=n1
 			if v_dot(n0,n1)>0.995 then
 				-- quad
-				f[fi]={n=n0}
+				-- material:
+				-- 0: snow
+				-- 1: dirt
+				f[fi]=with_material({n=n0},i)
 			else
 				-- 2 tri
-				f[fi]={n=n0}
-				f[fi+1]={n=n1}
+				f[fi]=with_material({n=n0},i)
+				f[fi+1]=with_material({n=n1},i)
 			end
 
 			-- actor position (if any)
-			local u,t=v_clone(u2),rnd(0.5)
-			v_scale(u,t)
-			v_add(u,u3,0.5-t)
+			local u,t0,t1=v_clone(u2),rnd(),rnd()
+			v_scale(u,t0)
+			v_add(u,u3,t1)
+			v_scale(u,1/(rnd()+t0+t1))
 			if(s0.actors[i]) s0.actors[i].u=u
 
 			fi+=2
@@ -1332,7 +1338,9 @@ function make_ground(delta_slope)
 		return tiles	
 	end
 
+	local plyr_z_index=flr(nz/2)-1
 	return {
+		plyr_pos={dx*slices[plyr_z_index].track_x,10,plyr_z_index*dz},
 		to_tile_coords=function(self,v)
 			return flr(v[1]/dx),flr(v[3]/dz)
 		end,
@@ -1408,6 +1416,7 @@ function make_ground(delta_slope)
 		-- find all actors within a given radius from given position
 		collide=function(self,p,r)
 			local i0,j0=self:to_tile_coords(p)
+			if (i0==0 or i0==nx-2) return 2
 			
 			-- square radius
 			r*=r
@@ -1425,7 +1434,7 @@ function make_ground(delta_slope)
 							v_add(v0,actor.u)
 							local d=make_v(p,v0)
 							if v_dot(d,d)<r+actor.r*actor.r then
-								return true
+								return 1
 							end
 						end
 					end
@@ -1505,6 +1514,7 @@ function make_rspr(sx,sy,n,tc)
 		end
 	end
 end
+
 -->8
 -- infinite number
 function make_big_number()

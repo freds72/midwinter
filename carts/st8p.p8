@@ -902,7 +902,6 @@ function plyr_death_state(snowball,pos)
 		update=function()
 			text_ttl-=1
 			snowball_sprite(turn_side*time()*2)
-			
 			-- adjust ground
 			local p=snowball.pos
 			ground:update(p)
@@ -913,7 +912,13 @@ function plyr_death_state(snowball,pos)
 				text_ttl=10
 				turn_side*=-1
 			end
-			cam:track({p[1],p[2],p[3]+16},0.5,v_up)
+			cam:track({mid(p[1],4,30*4),p[2],p[3]+16},0.5,v_up)
+
+			if btnp(4) or btnp(5) then
+				pop_state()
+				pop_state()
+				push_state(menu_state)
+			end
 		end
 	}
 end

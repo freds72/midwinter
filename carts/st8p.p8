@@ -368,6 +368,31 @@ function make_cam()
 end
 
 -- "physic body" for simple car
+local debug_sa,debug_min,debug_max={},-64,64
+function add_debug_sample(s,mi,ma)
+	debug_min=mi
+	debug_max=ma
+	add(debug_sa,s)
+	if #debug_sa==128 then
+		for i=1,127 do
+			debug_sa[i]=debug_sa[i+1]
+		end
+		debug_sa[128]=nil
+	end
+end
+function draw_debug_samples()
+	rectfill(0,64,127,64,13)
+	fillp(0xa5a5)
+	local y=64-debug_min
+	rectfill(0,y,127,y,5)
+	y=64-debug_max
+	rectfill(0,y,127,y,5)
+	fillp()
+	for i=1,#debug_sa do
+		pset(i,64-debug_sa[i],8)
+	end
+end
+
 function make_car(p)
 	-- last contact face
 	local up,oldf={0,1,0}
@@ -415,7 +440,8 @@ function make_car(p)
 			angularv*=0.86
 			-- v_scale(velocity,0.97)
 			-- some friction
-			v_add(velocity,velocity,-0.05*v_dot(velocity,velocity))
+			local f=self.on_ground==true and 0.05 or 0.005
+			v_add(velocity,velocity,-f*v_dot(velocity,velocity))
 		end,
 		integrate=function(self)
 		 	-- update pos & orientation
@@ -434,14 +460,23 @@ function make_car(p)
 
 				-- desired ski direction
 				local m=make_m_from_v_angle(up,angle-steering_angle/16)
-				local right=m_right(m)
+				local fwd,right=m_fwd(m),m_right(m)
 				
 				-- slip angle
 				local sa=-v_dot(velocity,right)
 				if abs(sa)>0.001 then
 					-- max grip
+					local vn=v_clone(velocity)
+					v_normz(vn)
+					local grip=1-abs(v_dot(fwd,vn))
+					-- more turn: more grip
+					sa*=60--*grip
+
+					grip=min(3*grip,1)
+					add_debug_sample(sa,-grip,grip)
+
 					-- todo: review
-					-- sa=mid(sa,-0.5,0.5)
+					sa=mid(sa,-5*grip,5*grip)
 				
 					-- ski length for torque
 					local ski_len=0.8
@@ -452,7 +487,7 @@ function make_car(p)
 					local l=torque[1]+torque[2]+torque[3]
 					]]
 
-					v_scale(right,30*sa)
+					v_scale(right,sa)
 
 					self:apply_force_and_torque(right,-steering_angle*ski_len/4)				
 				end
@@ -833,6 +868,9 @@ function play_state()
 			-- score
 			local s=score:tostr()
 			printb(s,nil,4,12,1,7)
+
+
+			draw_debug_samples(-1,1)
 
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,

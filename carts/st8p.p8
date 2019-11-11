@@ -381,6 +381,7 @@ function make_car(p)
 	return {
 		pos=v_clone(p),
 		on_ground=false,
+		height=0,
 		get_pos=function(self)
 	 		return self.pos,angle,steering_angle/0.625
 		end,
@@ -473,11 +474,14 @@ function make_car(p)
 			end
 			-- stop at ground
 			self.on_ground=false
+			local tgt_height=1
 			if newpos and pos[2]<=newpos[2] then
-				up=newf.n			
-				pos[2]=newpos[2]
+				up=newf.n
+				tgt_height=pos[2]-newpos[2]
+				pos[2]=newpos[2]				
 				self.on_ground=true
 			end
+			self.height=lerp(self.height,tgt_height,0.8)
 		end
 	}	
 end
@@ -813,9 +817,9 @@ function play_state()
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
-
-				spr(9,34+3*cos(time()/4),128-14-14*steering+4*sin(time()/5),4,4)
-				spr(9,74-2*cos(time()/5),128-14+14*steering+4*sin(time()/4),4,4,true)
+				local dy=plyr.height*16
+				spr(9,34+3*cos(time()/4),128+dy-steering*14,4,4)
+				spr(9,74-2*cos(time()/5),128+dy+steering*14,4,4,true)
 			
 				-- difficulty levels = less hearts!
 				-- ♥
@@ -826,7 +830,7 @@ function play_state()
 				printb(s,2,4,7,5,1)
 
 				local dz=plyr:get_velocity()[3]
-				score_acc+=(dz>0 and dz or 0)
+				score_acc+=max(dz)
 				score:add(score_acc)
 				score_acc-=flr(score_acc)
 			end

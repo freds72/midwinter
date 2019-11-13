@@ -229,9 +229,7 @@ end
 local ground,plyr,cam
 local actors={}
 
-local k_far,k_near=0,2
-local k_right,k_left=4,8
-local z_near=0.2
+local k_far,k_near,k_right,k_left,z_near=0,2,4,8,0.2
 
 -- camera
 function make_cam()
@@ -241,15 +239,6 @@ function make_cam()
 	-- screen shake
 	local shkx,shky=0,0
 	camera()
-	
-	-- raycasting constants
-	local angles={}
-	local dists={}
-	for i=0,15 do
-	 local z=i-7.5
-		add(angles,atan2(7.5,z))
-	 add(dists,sqrt(7.5*7.5+z*z))
-	end
 
 	local update_bkg_sprite=make_rspr(32,16,32,0)
 
@@ -257,9 +246,9 @@ function make_cam()
 		pos={0,0,0},
 		angle=0,
 		m=make_m_from_v_angle(v_up,0),
-		shake=function(self,u,v,pow)
-			shkx=min(4,shkx+pow*u)
-			shky=min(4,shky+pow*v)
+		shake=function()
+			shkx=min(4,shkx+rnd(8))
+			shky=min(4,shky+rnd(8))
 		end,
 		update=function(self)
 			shkx*=-0.7-rnd(0.2)
@@ -295,15 +284,14 @@ function make_cam()
 			self.pos=pos
 		end,
 		project2d=function(self,v)
-			return 63.5+flr(63.5*v[1]/v[3]),63.5-flr(63.5*v[2]/v[3])
+			local w=63.5/v[3]
+			return v.x or 63.5+flr(w*v[1]),v.y or 63.5-flr(w*v[2]),w
 		end,
 		project_poly=function(self,p,c0)
-			local p0,p1=p[1],p[2]
-			local x0,y0=p0.x or 63.5+flr(63.5*p0[1]/p0[3]),p0.y or 63.5-flr(63.5*p0[2]/p0[3])
-			local x1,y1=p1.x or 63.5+flr(63.5*p1[1]/p1[3]),p1.y or 63.5-flr(63.5*p1[2]/p1[3])
+			local x0,y0=self:project2d(p[1])
+			local x1,y1=self:project2d(p[2])
 			for i=3,#p do
-				local p2=p[i]
-				local x2,y2=p2.x or 63.5+flr(63.5*p2[1]/p2[3]),p2.y or 63.5-flr(63.5*p2[2]/p2[3])
+				local x2,y2=self:project2d(p[i])
 				trifill(x0,y0,x1,y1,x2,y2,c0)
 				x1,y1=x2,y2
 			end
@@ -359,8 +347,8 @@ function make_cam()
 			circfill(x0+16*v,y0-16*u,250,6)
 			circfill(x0+16*v,y0-16*u,245,12)
 
-			x0-=v/1.2
-			y0-=u/1.2
+			x0-=v
+			y0-=u
 			for i=-7,7 do
 				spr(36,x0+i*u,y0+i*v,2,2)
 			end
@@ -380,6 +368,7 @@ function make_car(p)
 	local angle,steering_angle=0,0
 	local on_air_ttl=0
 
+	local g={0,-4,0}
 	return {
 		pos=v_clone(p),
 		on_ground=false,
@@ -401,7 +390,6 @@ function make_car(p)
 		end,
 		prepare=function(self)
 			-- gravity and ground
-			local g={0,-4,0}
 			self:apply_force_and_torque(g,0)
 			-- on ground?
 			if self.on_ground==true then
@@ -467,7 +455,7 @@ function make_car(p)
 
 					v_scale(right,sa)
 
-					self:apply_force_and_torque(right,-steering_angle*ski_len/4)				
+					self:apply_force_and_torque(right,-steering_angle*ski_len/4)
 				end
 			elseif self.on_ground==false then
 				self:apply_force_and_torque({0,0,0},-steering_angle/8)
@@ -484,7 +472,7 @@ function make_car(p)
 			if newf then
 				oldf=newf
 			end
-			self.gps=gps and gps-angle
+			self.gps=gps
 			-- stop at ground
 			self.on_ground=false
 			local tgt_height=1
@@ -519,8 +507,8 @@ function make_plyr(p,hp)
 
 	local body_update=body.update
 
-	local jump_ttl,jump_pressed=0 
-	local hit_ttl=0
+	local hit_ttl,jump_ttl,jump_pressed=0,0
+	-- todo: ttl for multiplier
 	local multiplier=0
 
 	body.control=function(self)	
@@ -557,7 +545,7 @@ function make_plyr(p,hp)
 		local hit_type=ground:collide(self.pos,0.2)
 		if hit_type==2 then
 			-- insta-death
-			cam:shake(rnd(8),rnd(8),1)
+			cam:shake()
 			self.dead=true
 		elseif hit_type==3 then
 			-- score multiplier
@@ -566,7 +554,7 @@ function make_plyr(p,hp)
 		elseif hit_ttl<0 and hit_type==1 then
 			sfx(rnd()>0.5 and 9 or 10)
 			hp-=1
-			cam:shake(rnd(8),rnd(8),1)
+			cam:shake()
 			-- temporary invincibility
 			hit_ttl=20
 			if hp==0 then
@@ -658,19 +646,6 @@ function menu_state()
 		rectfill(x-w,y-h,x+w,y+h,c)
 		spr(2,x+w+1,y-h-2,1,2)
 		print(s,x-#s*1.5-5,y-2,6)
-		if mode==1 then
-			local k=0
-			for j=0,2*h do
-				for i=0,3 do
-					local x0=(90*time()+i+j)%(2*w+7)
-					if x0<2*w+k then
-						x0+=x-w
-						pset(x0,y-h+j,cols[pget(x0,y-h+j)])
-				end
-			end
-			k+=(j>h and -1 or 1)
-			end
-		end
 		pal()
 
 		-- mask
@@ -684,21 +659,20 @@ function menu_state()
 	end
    
 	local panels={
-		{text="marmottes",c=1,params={slope=1.8}},
-		{text="biquettes",c=8,params={slope=2.5}},
-		{text="chamois",c=0,params={slope=3.2}}
+		{text="marmottes",c=1,params={slope=1.8,hp=3}},
+		{text="biquettes",c=8,params={slope=2.5,hp=2}},
+		{text="chamois",c=0,params={slope=3.2,hp=1}}
 	}
 	local sel,sel_tgt,sel_max=0,0,#panels
-	local blink=false
-	local ttl=20
+	local blink,ttl=false,20
 
 	ground=make_ground({slope=0})
 
-	-- reset cam	
-	cam=make_cam()
-
 	-- reset rotated sprites
 	reload()
+
+	-- reset cam	
+	cam=make_cam()
 
 	music(0)
 	sfx(-1)
@@ -821,7 +795,7 @@ function play_state(params)
 	ground=make_ground(params)
 
 	-- create player in correct direction
-	plyr=make_plyr(ground.plyr_pos,3)
+	plyr=make_plyr(ground.plyr_pos,params.hp)
 
 	-- reset cam	
 	cam=make_cam()
@@ -938,7 +912,7 @@ function play_state(params)
 				cam:track(pos,a,plyr:get_up())
 
 				if plyr.dead then
-					cam:shake(rnd(8),rnd(8),1)
+					cam:shake()
 
 					-- snowballing!!!
 					local snowball=make_snowball(plyr.pos)
@@ -982,7 +956,7 @@ function plyr_death_state(snowball,pos)
 			if text_ttl<0 and ground:collide(p,0.2) then
 				text_id,text_ttl=flr(rnd(#text)),10
 				turn_side*=-1
-				cam:shake(rnd(8),rnd(8),1)
+				cam:shake()
 			end
 			-- keep camera off side walls
 			cam:track({mid(p[1],8,29*4),p[2],p[3]+16},0.5,v_up)
@@ -1083,11 +1057,12 @@ function draw_drawables(objects)
 				local m,v0,u=cam.m,d.v0,d.fa.u
 				local x,y,z=v0[1]+u[1],v0[2]+u[2],v0[3]+u[3]
 				local az=m[3]*x+m[7]*y+m[11]*z+m[15]
-				if az>z_near and az<64 then	
+				if az>z_near then	
 					local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
 					-- sprite
-					local x,y,w=63.5+flr(shl(ax/az,6)),63.5-flr(shl(ay/az,6)),shl(4/az,6)
-					draw_sprite(d.fa,x,y,w,d.dist)
+					local w=63.5/az
+					local x,y=63.5+flr(w*ax),63.5-flr(w*ay)
+					draw_sprite(d.fa,x,y,4*w,d.dist)
 				end
 			end
 		end
@@ -1170,6 +1145,7 @@ function make_tracks(xmin,xmax,max_tracks)
 				-- don't kill new seeds
 				-- don't kill main track
 				if s1.age>0 and flr(s0.x-s1.x)==0 and not s1.main then
+					-- todo: kill s0
 					s1.dead=true
 				end
 			end
@@ -1215,7 +1191,7 @@ function make_ground(params)
 			end	
 
 			local ay=m[2]*x+m[6]*y+m[10]*z+m[14]
-			t[k]={ax,ay,az,outcode=outcode,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6))}
+			t[k]={ax,ay,az,outcode=outcode,x=63.5+flr(63.5*ax/az),y=63.5-flr(63.5*ay/az)}
 			return t[k]
 		end
 	}
@@ -1228,7 +1204,7 @@ function make_ground(params)
 		local tracks=next_tracks()
 		
 		-- height array + props array
-		local h,actors,gps={},{},{}
+		local h,actors={},{}
 		for i=0,nx-1 do
 			h[i]=rnd(2*delta_slope)
 			-- tree
@@ -1242,30 +1218,32 @@ function make_ground(params)
 			end
 		end
 
+		-- side walls
 		h[0]=15+rnd(5)
 		h[nx-1]=15+rnd(5)
 
 		-- flatten track
 		local main_track_x
 		for _,t in pairs(tracks) do
-			if(t.main) main_track_x=t.x
 			local i0,i1=flr(t.x-2),flr(t.x+2)
-			for i=i0,i1 do				
-				-- smooth track
-				h[i]=t.h+h[i]/4
-				-- remove props from track
-				actors[i],gps[i]=nil,t.angle
-			end
-			-- track entry sign
-			if t.age<2 then
-				--actors[flr(t.x)]={sx=16,sy=16,w=8,y=20}
-			end
-			-- track borders
-			if slice_id%2==0 then
-				local pole=t.h!=0 and warning_pole or border_pole
-				actors[i0-1]={sx=pole.sx,sy=pole.sy}
-				actors[i1+1]={sx=pole.sx,sy=pole.sy}
-			elseif not t.main then
+			if t.main then
+				main_track_x=t.x
+				for i=i0,i1 do				
+					-- smooth track
+					h[i]=t.h+h[i]/4
+					-- remove props from track
+					actors[i]=nil
+				end
+				-- track borders
+				if slice_id%2==0 then
+					local pole=t.h!=0 and warning_pole or border_pole
+					actors[i0-1]={sx=pole.sx,sy=pole.sy}
+					actors[i1+1]={sx=pole.sx,sy=pole.sy}
+				end
+			else
+				for i=i0,i1 do				
+					h[i]+=t.h
+				end
 				-- coins
 				actors[flr(t.x)]={strip=coins_strip,speed=3,r=1,score=1}
 			end
@@ -1275,9 +1253,8 @@ function make_ground(params)
 		return {
 			y=y,
 			h=h,
-			track_x=main_track_x,
-			actors=actors,
-			gps=gps
+			x=main_track_x*dx,
+			actors=actors
 		}
 	end
 
@@ -1296,23 +1273,20 @@ function make_ground(params)
 			return f
 		end
  	
-		local f,actor={}
-		local fi=0
+		local f,fi,actor={},0
 		for i=0,nx-2 do
 			local v0={i*dx,s0.h[i]+s0.y,j*dz}
 			-- v1-v0
 			local u1={dx,s0.h[i+1]-s0.h[i],0}
 			-- v2-v0
-			local u2={dx,s1.h[i+1]+s1.y-s0.h[i]-s0.y,dz}
+			local u2={dx,s1.h[i+1]+s1.y-v0[2],dz}
 			-- v3-v0
-			local u3={0,s1.h[i]+s1.y-s0.h[i]-s0.y,dz}
+			local u3={0,s1.h[i]+s1.y-v0[2],dz}
 
-			-- normal 
-			local n0=v_cross(u3,u2)
+			-- normals
+			local n0,n1=v_cross(u3,u2),v_cross(u2,u1)
 			v_normz(n0)
-			local n1=v_cross(u2,u1)
 			v_normz(n1)
-			local v=n1
 			if v_dot(n0,n1)>0.995 then
 				-- quad
 				-- material:
@@ -1381,17 +1355,16 @@ function make_ground(params)
 			local az=m[3]*x+m[7]*y+m[11]*z+m[15]
 			if az>z_near and az<64 then	
 				local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
-				out[#out+1]={key=1/(ay*ay+az*az),a=actor,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=shl(4/az,6),dist=dist}
+				local w=63.5/az
+				out[#out+1]={key=1/(ay*ay+az*az),a=actor,x=63.5+flr(w*ax),y=63.5-flr(w*ay),w=4*w,dist=dist}
 			end
 		end
 	end
 
 	-- raycasting constants
-	local angles,dists={},{}
+	local angles={}
 	for i=0,23 do
-		local z=i-12.5
-		add(angles,atan2(7.5,z))
-		add(dists,sqrt(7.5*7.5+z*z))
+		add(angles,atan2(7.5,i-12.5))
 	end
 
 	local function visible_tiles(pos,angle)
@@ -1441,7 +1414,7 @@ function make_ground(params)
 
 	local plyr_z_index=flr(nz/2)-1
 	return {
-		plyr_pos={dx*slices[plyr_z_index].track_x,10,plyr_z_index*dz},
+		plyr_pos={slices[plyr_z_index].x,10,plyr_z_index*dz},
 		to_tile_coords=function(self,v)
 			return flr(v[1]/dx),flr(v[3]/dz)
 		end,
@@ -1474,7 +1447,8 @@ function make_ground(params)
 			end
 		end,
 		update=function(self,p)
-			if p[3]/dz>8 then
+			local pz=p[3]/dz
+			if pz>8 then
 				-- shift back
 				p[3]-=dz
 				local old_y=slices[0].y
@@ -1489,8 +1463,7 @@ function make_ground(params)
 				mesh(nz-2)
 			end
 			-- update y offset
-			local t=(p[3]/dz)%1
-			dy=slices[0].y*(1-t)+t*slices[1].y
+			dy=lerp(slices[0].y,slices[1].y,pz%1)
 		end,
 		find_face=function(self,p)
 			-- z slice
@@ -1510,9 +1483,10 @@ function make_ground(params)
 
 			-- intersection point
 			local t=-v_dot(make_v({i*dx,s0.h[i]+s0.y-dy,j*dz},p),f.n)/f.n[2]
+			-- todo: return y value only
 			p=v_clone(p)
 			p[2]+=t
-			return f,p,s0.gps[i]
+			return f,p,atan2(slices[i+4].x-p[1],4*dz)
 		end,
 		-- find all actors within a given radius from given position
 		collide=function(self,p,r)
@@ -1569,7 +1543,6 @@ function make_rspr(sx,sy,n,tc)
 	for i=0,n-1 do
 		local a=i/n-0.25
 		local ca,sa=cos(a),sin(a)
-		local ddx0,ddy0=ca,sa
 		local dx0,dy0=(sa-ca)*7.5+8,-(ca+sa)*7.5+8
 		
 		rectfill(0,0,15,15,tc)
@@ -1582,11 +1555,11 @@ function make_rspr(sx,sy,n,tc)
 				if band(bor(srcx,srcy),0xfff0)==0 then
 					pset(ix,iy,sget(sx+srcx,sy+srcy))
 				end
-				srcx-=ddy0
-				srcy+=ddx0
+				srcx-=sa
+				srcy+=ca
 			end
-			dx0+=ddx0
-			dy0+=ddy0
+			dx0+=ca
+			dy0+=sa
 
 			cache[dst],cache[dst+4]=peek4(src),peek4(src+4)
 			-- one line down
@@ -1753,15 +1726,10 @@ function z_poly_clip(znear,v)
 end
 
 function plane_poly_clip(n,v)
-	local dist,allin={},0
+	local dist={}
 	for i,a in pairs(v) do
-		local d=n[4]-(a[1]*n[1]+a[2]*n[2]+a[3]*n[3])
-		if(d>0) allin+=1
-	 dist[i]=d
+		dist[i]=n[4]-(a[1]*n[1]+a[2]*n[2]+a[3]*n[3])
 	end
- -- early exit
-	if(allin==#v) return v
- if(allin==0) return {}
 
 	local res={}
 	local v0,d0,v1,d1,t,r=v[#v],dist[#v]

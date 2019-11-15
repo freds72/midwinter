@@ -107,16 +107,7 @@ function m_inv(m)
 	m[3],m[9]=m[9],m[3]
 	m[7],m[10]=m[10],m[7]
 end
--- inline matrix vector multiply invert
--- inc. position
-function m_inv_x_v(m,v)
-	local x,y,z=v[1]-m[13],v[2]-m[14],v[3]-m[15]
-	return {m[1]*x+m[2]*y+m[3]*z,m[5]*x+m[6]*y+m[7]*z,m[9]*x+m[10]*y+m[11]*z}
-end
 
-function m_set_pos(m,v)
-	m[13],m[14],m[15]=v[1],v[2],v[3]
-end
 -- returns basis vectors from matrix
 function m_right(m)
 	return {m[1],m[2],m[3]}
@@ -647,15 +638,6 @@ function menu_state()
 		spr(2,x+w+1,y-h-2,1,2)
 		print(s,x-#s*1.5-5,y-2,6)
 		pal()
-
-		-- mask
-		rectfill(0,0,127,27,0)
-		rectfill(0,92,127,127,0)
-		palt(14,true)
-		palt(0,false)
-		spr(128,64,28,8,9)
-		spr(128,0,28,8,9,true)
-		palt()
 	end
    
 	local panels={
@@ -707,6 +689,15 @@ function menu_state()
 				a+=da
 			end
 
+			-- mask
+			rectfill(0,0,127,27,0)
+			rectfill(0,92,127,127,0)
+			palt(14,true)
+			palt(0,false)
+			spr(128,64,28,8,9)
+			spr(128,0,28,8,9,true)
+			palt()
+			
 			printb("⬅️➡️ select track",31,110,7,5,1)
 			if((time()%1)<0.5) printb("❎/🅾️ go!",50,120,10,5,1)
 			print("▤@freds72 - ♪@gruber",20,2,1)
@@ -823,8 +814,9 @@ function play_state(params)
 			for _,a in pairs(actors) do
 				local p=m_x_v(cam.m,a.pos)
 				local ax,ay,az=p[1],p[2],p[3]
-				if az>z_near and az<64 then	
-					out[#out+1]={key=1/(ay*ay+az*az),a=a,x=63.5+flr(shl(ax/az,6)),y=63.5-flr(shl(ay/az,6)),w=shl(4/az,6),dist=1}
+				if az>z_near and az<64 then
+					local x,y,z=cam:project2d(p)
+					out[#out+1]={key=1/(ay*ay+az*az),a=a,x=x,y=y,w=4*w,dist=1}
 				end
 			end
 
@@ -837,8 +829,8 @@ function play_state(params)
 			sort(out)
 			draw_drawables(out)
 			 
-			--local cpu=flr(10000*stat(1))/100
-			--print(cpu.."%\n"..stat(0),96,2,2)
+			local cpu=flr(10000*stat(1))/100
+			print(cpu.."%\n"..stat(0),96,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
@@ -885,7 +877,6 @@ function play_state(params)
 				spr(72,108,1,2,2)
 
 				palt()
-				-- print(plyr.gps,64,38,8)
 			end
 
 			-- score
@@ -1434,7 +1425,7 @@ function make_ground(params)
 					local v0={i*dx,s0.h[i]+s0.y-dy,j*dz}
 					-- face(s)
 					-- force quad rendering for far away tiles
-					local f0,f1=s0.f[2*i],dist<8 and s0.f[2*i+1]
+					local f0,f1=s0.f[2*i],s0.f[2*i+1]
 					if f1 then
 						-- 2 triangles
 						if(f0) collect_face(v0,f0,s0.actors[i],{k,k+1+nx,k+nx},v_cache,cam_pos,out,dist)

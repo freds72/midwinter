@@ -845,7 +845,7 @@ function play_state(params)
 		make_rspr(48,0,128)}
 
 	local gps_sprite=make_rspr(64,32,128)
-	local t,help_ttl=0,60
+	local t=0
 
 	return {
 		-- draw
@@ -912,15 +912,11 @@ function play_state(params)
 								
 			end
 
-			if help_ttl>0 then
-				-- todo: show help
-			end
 			if(fade_async) fade_async=corun(fade_async,0,true)
 		end,
 		-- update
 		update=function()
 			t+=1
-			help_ttl-=1
 			cam:update()
 			if plyr then
 				plyr:control()	

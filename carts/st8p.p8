@@ -193,7 +193,6 @@ function whiteout_async(delay,t0,t1)
 	for i=t0,t1,t1>t0 and 1 or -1 do
 		-- fade to white
 		local c=4*((t1-i)/(t1-t0))
-		printh(c)
 		for y=0,15 do
 			pal(y,sget(24+c,y),1)
 		end
@@ -243,9 +242,9 @@ function make_cam()
 		track=function(self,pos,a,u)
    			pos=v_clone(pos)
    			-- lerp angle
-			self.angle=lerp(self.angle,a,0.08)
+			self.angle=lerp(self.angle,a,0.8)
 			-- lerp orientation
-			up=v_lerp(up,u,0.08)
+			up=v_lerp(up,u,0.1)
 			v_normz(up)
 
 			-- shift cam position			
@@ -556,7 +555,7 @@ function make_plyr(p,params)
 		if self.pos[1]>=slice_extent[1] and self.pos[1]<=slice_extent[2] then
 			if slice.is_checkpoint then
 				if self.pos[3]>slice_extent[3] then
-					add_time_bonus(1)
+					add_time_bonus(params.bonus_t)
 					sfx(1)
 				end
 				slice.is_checkpoint=nil
@@ -666,14 +665,13 @@ function menu_state()
 	end
    
 	local panels={
-		{text="marmottes",c=1,params={slope=1,tracks=1,record_t=60*30}},
-		{text="biquettes",c=8,params={slope=2,record_t=30*30}},
-		{text="chamois",c=0,params={slope=3,record_t=15*30}}
+		{text="marmottes",c=1,params={slope=1.2,tracks=1,bonus_t=2,record_t=30*30,show_help=true}},
+		{text="biquettes",c=8,params={slope=2,tracks=2,bonus_t=1.5,record_t=20*30}},
+		{text="chamois",c=0,params={slope=3,bonus_t=1.5,record_t=15*30}}
 	}
-	local sel,sel_tgt,sel_max=0,0,#panels
-	local blink,ttl=false,20
+	local sel,sel_tgt,blink=0,0,false
 
-	ground=make_ground({slope=0})
+	ground=make_ground({slope=0,tracks=1})
 
 	-- reset rotated sprites
 	reload()
@@ -696,7 +694,7 @@ function menu_state()
 			draw_drawables(out)
 
 			local y=20
-			local a,da=0,1/3
+			local a,da=1/3,-1/3
 			for i=1,#panels do
 				local mode=0
 				if sel==sel_tgt then
@@ -709,7 +707,7 @@ function menu_state()
 				v=m_x_v(cam.m,v)
 				if v[3]>0 then
 					local x0,y0=cam:project2d(v)
-					draw_box(panels[i].text,x0+32,y0,panels[i].c,mode)
+					draw_box(panels[i].text..i,x0+32,y0,panels[i].c,mode)
 				end
 				a+=da
 			end
@@ -733,18 +731,17 @@ function menu_state()
 
 			if(btnp(0)) sel-=1
 			if(btnp(1)) sel+=1
-			sel=mid(sel,0,sel_max-1)
+			sel=mid(sel,0,#panels-1)
 
-			local k=sel
-  			sel_tgt=lerp(sel_tgt,k,0.18)
+  			sel_tgt=lerp(sel_tgt,sel,0.18)
    			-- snap when close to target
-			if abs(sel_tgt-k)<0.01 then
-				sel_tgt=k
+			if abs(sel_tgt-sel)<0.01 then
+				sel_tgt=sel
 			end
 
 			if btnp(4) or btnp(5) then
 				-- snap track
-				sel_tgt=k
+				sel_tgt=sel
 				sfx(8)
 				-- sub-state
 				start_game_async=cocreate(function()
@@ -758,7 +755,7 @@ function menu_state()
 			end
 
 			--
-			cam:track({8*8,0,8*8},sel/3,v_up)
+			cam:track({8*8,0,8*8},sel_tgt/3,v_up)
 		end
 	}
 end
@@ -823,6 +820,7 @@ function play_state(params)
 		make_rspr(48,0,128)}
 
 	local gps_sprite=make_rspr(64,32,128)
+	local help_ttl=60
 
 	return {
 		-- draw
@@ -852,8 +850,8 @@ function play_state(params)
 			sort(out)
 			draw_drawables(out)
 			 
-			local cpu=flr(10000*stat(1))/100
-			print(cpu.."%\n"..stat(0),96,2,2)
+			-- local cpu=flr(10000*stat(1))/100
+			-- print(cpu.."%\n"..stat(0),96,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
@@ -891,10 +889,14 @@ function play_state(params)
 								
 			end
 
+			if help_ttl>0 then
+				-- todo: show help
+			end
 			if(fade_async) fade_async=corun(fade_async,0,15,0)
 		end,
 		-- update
 		update=function()
+			help_ttl-=1
 			cam:update()
 			if plyr then
 				plyr:control()	
@@ -938,6 +940,7 @@ function plyr_death_state(snowball,pos,time_over)
 	}
 	return {
 		draw=function()
+			printb("game over!",nil,30+8*cos(time()),8,2,7)
 			if text_ttl>0 then
 				print(text[text_id+1],60,50+text_ttl,8)
 			end
@@ -1175,7 +1178,7 @@ function make_ground(params)
 	local slices={}
 
 	-- track generator
-	local next_tracks=make_tracks(8,nx-8,3)
+	local next_tracks=make_tracks(8,nx-8,params.tracks or 3)
 
 	-- uses m (matrix) and v (vertices) from self
 	-- saves the 'if not ...' in inner loop
@@ -1607,7 +1610,6 @@ function padding(n)
 end
 
 function time_tostr(t)
-	if(t==32000) return "--"
 	-- frames per sec
 	local s=padding(flr(t/30)%60).."''"..padding(flr(10*t/3)%100)
 	-- more than a minute?

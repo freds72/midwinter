@@ -9,11 +9,6 @@ function lerp(a,b,t)
 	return a*(1-t)+b*t
 end
 
-function smoothstep(t)
-	t=mid(t,0,1)
-	return t*t*(3-2*t)
-end
-
 function make_v(a,b)
 	return {
 		b[1]-a[1],
@@ -250,10 +245,10 @@ function make_cam()
 			end
 			camera(shkx,shky)
 		end,
-		track=function(self,pos,a,u)
+		track=function(self,pos,a,u,power)
    			pos=v_clone(pos)
    			-- lerp angle
-			self.angle=lerp(self.angle,a,0.8)
+			self.angle=lerp(self.angle,a,power or 0.8)
 			-- lerp orientation
 			up=v_lerp(up,u,0.1)
 			v_normz(up)
@@ -323,21 +318,19 @@ function make_cam()
 			local x0,y0=self:project2d(h)
 
 			-- horizon 'normal'
-			local u,v=self.m[5],self.m[6]
-			local d=sqrt(u*u+v*v)
-			u/=d
-			v/=d
+			local u={self.m[5],self.m[6],0}
+			v_normz(u)
 			-- get rotated sprite
-			local angle=atan2(u,v)+0.25
+			local angle=atan2(u[1],u[2])+0.25
+			v_scale(u,16)
 			
-			u,v=16*v,16*u
 			angle=(angle%1+1)%1
 
 			for _,c in pairs(clouds2) do
-				circfill(x0+c.i*u,y0+c.i*v,c.r,6)
+				circfill(x0+c.i*u[2],y0+c.i*u[1],c.r,6)
 			end
 			for _,c in pairs(clouds) do
-				circfill(x0+c.i*u,y0+c.i*v,c.r,ground_color)
+				circfill(x0+c.i*u[2],y0+c.i*u[1],c.r,ground_color)
 			end
 			-- clip bottom cloud
 			if #verts>2 then
@@ -354,11 +347,9 @@ function make_car(p)
 	-- last contact face
 	local up,oldf={0,1,0}
 
-	local velocity,angularv={0,0,0},0
-	local forces,torque={0,0,0},0
+	local velocity,angularv,forces,torque={0,0,0},0,{0,0,0},0
 
-	local angle,steering_angle=0,0
-	local on_air_ttl=0
+	local angle,steering_angle,on_air_ttl=0,0,0
 
 	local g={0,-4,0}
 	return {
@@ -370,9 +361,6 @@ function make_car(p)
 		end,
 		get_up=function()
 			return v_lerp(v_up,up,abs(cos(angle)))
-		end,
-		get_velocity=function()
-			return velocity
 		end,
 		apply_force_and_torque=function(self,f,t)
 			-- add(debug_vectors,{f=f,p=p,c=11,scale=t})
@@ -483,12 +471,11 @@ function make_car(p)
 			-- alter sound
 			-- mix: volume for base pitch
 			-- alter with "height" to include slope "details"
-			local src=0x3200+68*11
+			-- sfx 11: 0x3200+68*11
 			local vol=max(flr(20*v_len(velocity)+10*self.height))
-			for i=0,15 do
+			for src=0x34ec,0x34fb,2 do
 				local s=peek2(src)
 				poke2(src,bor(band(0xffe0,s),band(0x1f,flr(vol+rnd(4)))))
-				src+=2
 			end
 		end
 	}	
@@ -982,13 +969,13 @@ function plyr_death_state(pos,total_t,freeride_t,params,time_over)
 			printb(msgs[active_msg+1],nil,msg_y,c[1],c[2],c[3])
 			if(active_msg==0 and total_t>params.record_t) print("★new record★",50+rnd(2)-1,msg_y+8+rnd(2)-1,c[2])
 
-			if text_ttl>0 then
+			if text_ttl>0 and not time_over then
 				print(text[text_id+1],60,50+text_ttl,8)
 			end
 			if((time()%1)<0.5) printb("❎/🅾️ retry",42,120,10,5,1) printb("game over!",nil,38,8,2,7)
 		end,
 		update=function()
-			msg_y=lerp(msg_y,msg_tgt_y[msg_tgt_i+1],0.12)
+			msg_y=lerp(msg_y,msg_tgt_y[msg_tgt_i+1],0.08)
 			if(abs(msg_y-msg_tgt_y[msg_tgt_i+1])<1) msg_tgt_i+=1 
 			if(msg_tgt_i>#msg_tgt_y-1) msg_tgt_i=0 active_msg=(active_msg+1)%2
 
@@ -1007,7 +994,7 @@ function plyr_death_state(pos,total_t,freeride_t,params,time_over)
 			if time_over then
 				cam:track(p,0,v_up)
 			else
-				cam:track({mid(p[1],8,29*4),p[2],p[3]+16},0.5,v_up)
+				cam:track({mid(p[1],8,29*4),p[2],p[3]+16},0.5,v_up,0.2)
 			end
 
 			if btnp(4) or btnp(5) then
@@ -1131,9 +1118,7 @@ function make_tracks(xmin,xmax,max_tracks)
 		local ttl,trick_ttl,trick_type
 
 		local function reset_seed_timers()
-			ttl=12+rnd(20)
-			trick_ttl=4+rnd(4)
-			trick_type=flr(rnd(2))		
+			ttl,trick_ttl,trick_type=12+rnd(20),4+rnd(4),flr(rnd(2))		
 		end
 
 		reset_seed_timers()
@@ -1211,12 +1196,9 @@ function make_ground(params)
 	-- ground params
 	local delta_slope=params.slope
 
-	-- number of x/z slices
-	local nx,nz=32,32
-	-- cell size
-	local dx,dz=4,4
+	-- number of x/z slices + cell size
+	local nx,nz,dx,dy,dz=32,32,4,0,4
 
-	local dy=0
 	-- ground slices (from 0 to nz-1)
 	local slices={}
 
@@ -1228,9 +1210,8 @@ function make_ground(params)
 	local v_ground_cache_cls={
 		__index=function(t,k)
 			-- inline: local a=m_x_v(t.m,t.v[k]) 
-			local m=t.m
 			-- slice index
-			local i,j=k%nx,flr(k/nx)
+			local m,i,j=t.m,k%nx,flr(k/nx)
 			local s0=slices[j]
 			-- generate vertex
 			local x,y,z=i*dx,s0.h[i]+s0.y-dy,j*dz
@@ -1251,6 +1232,7 @@ function make_ground(params)
 	local tree_prop,left_pole,right_pole,side_pole={sx=112,sy=16},{sx=48,sy=0},{sx=48,sy=16},{sx=0,sy=48}
 	local coins_strip={{sx=0,sy=32},{sx=16,sy=32},{sx=32,sy=32},{sx=48,sy=32}}	
 	local function make_slice(y)
+		-- smooth altitude changes
 		slice_y=lerp(slice_y,y,0.2)
 		y=slice_y
 		-- generate tracks 
@@ -1272,8 +1254,7 @@ function make_ground(params)
 		end
 
 		-- side walls
-		h[0]=15+rnd(5)
-		h[nx-1]=15+rnd(5)
+		h[0],h[nx-1]=15+rnd(5),15+rnd(5)
 
 		-- flatten track
 		local main_track_x,xmin,xmax,is_checkpoint
@@ -1432,27 +1413,22 @@ function make_ground(params)
 		local tiles={[x0+y0*nx]=0}
 
 		for i,a in pairs(angles) do
-			a+=angle
-			local v,u=cos(a),-sin(a)
+			local v,u=cos(a+angle),-sin(a+angle)
 			
 			local mapx,mapy=x0,y0
-		
-			local ddx,ddy=1/u,1/v
-			local mapdx,distx
+	
+			local ddx,ddy,mapdx,distx,mapdy,disty=1/u,1/v
 			if u<0 then
 				mapdx,ddx=-1,-ddx
 				distx=(x-mapx)*ddx
 			else
-				mapdx=1
-				distx=(mapx+1-x)*ddx
+				mapdx,distx=1,(mapx+1-x)*ddx
 			end
-			local mapdy,disty
 			if v<0 then
 				mapdy,ddy=-1,-ddy
 				disty=(y-mapy)*ddy
 			else
-				mapdy=1
-				disty=(mapy+1-y)*ddy
+				mapdy,disty=1,(mapy+1-y)*ddy
 			end	
 			for dist=0,12 do
 				if distx<disty then
@@ -1528,14 +1504,11 @@ function make_ground(params)
 			-- z slice
 			local i,j=self:to_tile_coords(p)
 
-			-- todo: improve
-			if(i<0 or j<0) return
 			local s0=slices[j]
 			-- should not happen
 			-- assert(s0,"outside of map: "..i.."/"..j)
 
 			local f0,f1=s0.f[2*i],s0.f[2*i+1]
-			if(not f0) return
 			local f=f0
 			-- select face
 			if(f1 and (p[3]-dz*j<p[1]-dx*i)) f=f1
@@ -1615,7 +1588,7 @@ function make_rspr(sx,sy,n,tc)
 		rectfill(0,0,15,15,tc)
 		local cache={}
 		-- sprite sheet memory location
-		local src,dst=0x6000,64*8*flr(sy/8)+flr(sx%128)/2
+		local src,dst=0x6000,512*flr(sy/8)+flr(sx%128)/2
 		for iy=0,15 do
 			local srcx,srcy=dx0,dy0
 			for ix=0,15 do
@@ -1808,22 +1781,22 @@ __gfx__
 00006666660000000000000000000000111111111111111100000006000000000000000000000002888888888888882000000000000000000000000110000000
 00000000000000000000000000000000111111111111111100000006000000000000000000000002888888888888882000000000000000000000000440000000
 00000000000000000000000000000000111111111111111100000015100000000000000000000002888888888888882000000000000000000000000440000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000888882000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000882000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000000110000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000000000011aa1000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000000000011aaaa1000000000000000000000000000000000000000000000000000
 0000000000000000000000000000000000000000000000000000000000000000000011aaaaa10000000000000000000000000000000000000000000000000000
 00000000000000000000000000000000000000000000000000000000000000000011aaaaaa100000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000000000000000000000000000000000001aaaaaaa1000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000199999991000000000000000000000000000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000011999999100000000000000000000000000000000000000000000000000000
-000000f9990000000000000f900000000000000ff000000000000009f00000000000119999910000000000000000000000000000000000000000000000000000
-00000f9449900000000000f4490000000000000ff0000000000000944f0000000000001199991000000000000000000000000000000000000000000000000000
-000009499a90000000000094a900000000000009900000000000009a490000000000000011991000000000000000000000000000000000000000000000000000
-000009499a90000000000094a400000000000004400000000000004a490000000000000000110000000000000000000000000000000000000000000000000000
-0000099aa99000000000009aa400000000000004400000000000004aa90000000000000000000000000000000000000000000000000000000000000000000000
-00000099990000000000000940000000000000044000000000000004900000000000000000000000000000000000000000000000000000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000199999991000000006000060000000000000066660000000000000000000000
+00000000000000000000000000000000000000000000000000000000000000000011999999100000006644660000000000000677776600000000000000000000
+000000f9990000000000000f900000000000000ff000000000000009f00000000000119999910000000411421112400000006737777760000000000000000000
+00000f9449900000000000f4490000000000000ff0000000000000944f0000000000001199991000000444424114040000007333733360000000000000000000
+000009499a90000000000094a900000000000009900000000000009a490000000000000011991000000099214444000000000343334100000000000000000000
+000009499a90000000000094a400000000000004400000000000004a490000000000000000110000000002122e4e000000000013341000000000000000000000
+0000099aa99000000000009aa400000000000004400000000000004aa90000000000000000000000000000400040000000000004000000000000000000000000
+00000099990000000000000940000000000000044000000000000004900000000000000000000000000000500050000000000014100000000000000000000000
 00000000000000000000000000000000000011111100000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000001aa994410000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000000000000000000000000000000000001aa994410000000000000000000000000000000000000000000000000000000000000000000000000000000000000

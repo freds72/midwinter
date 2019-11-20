@@ -296,47 +296,41 @@ function make_cam()
 		end,
 		draw_horizon=function(self,ground_color,sky_color)
 			cls(sky_color)
-			-- draw horizon
-			local zfar=-128
-			local farplane={
-					{-zfar,zfar,zfar},
-					{-zfar,-zfar,zfar},
-					{zfar,-zfar,zfar},
-					{zfar,zfar,zfar}}
+			
 			-- cam up in world space
 			local n=m_up(self.m)
 			-- a bit ugly
 			v_scale(n,-1)
-			-- orientation
-			local p=m_x_v(self.m,self.pos)
-			n[4]=v_dot(p,n)
-			local verts=plane_poly_clip(n,farplane)
 
-			-- mountains
-			-- intersection between camera up plane (world space)
-			local h={0,-n[3]/n[2],1}
-			local x0,y0=self:project2d(h)
+			-- intersection between camera eye and up plane (world space)
+			local x0,y0=self:project2d({0,-n[3]/n[2],1})
 
 			-- horizon 'normal'
-			local u={self.m[5],self.m[6],0}
-			v_normz(u)
+			n[3]=0
+			v_normz(n)
+			local u,v=n[1],n[2]
 			-- get rotated sprite
-			local angle=atan2(u[1],u[2])+0.25
-			v_scale(u,16)
-			
+			local angle=atan2(u,v)+0.25
 			angle=(angle%1+1)%1
+			
+			-- horizon intersections
+			local xl,yl,xr,yr=0,y0-u*x0/v,128,y0+u*(128-x0)/v			
+			-- yl: min
+			-- yr: max
+			if(yl>yr) xl,yl,xr,yr=xr,yr,xl,yl
+
+			u*=16
+			v*=16
 
 			for _,c in pairs(clouds2) do
-				circfill(x0+c.i*u[2],y0+c.i*u[1],c.r,6)
+				circfill(x0+c.i*v,y0+c.i*u,c.r,6)
 			end
 			for _,c in pairs(clouds) do
-				circfill(x0+c.i*u[2],y0+c.i*u[1],c.r,ground_color)
+				circfill(x0+c.i*v,y0+c.i*u,c.r,ground_color)
 			end
-			-- clip bottom cloud
-			if #verts>2 then
-				self:project_poly(verts,ground_color)
-			end
-			
+
+			rectfill(0,128,128,yr,ground_color)
+			trifill(xl,yl,xr,yr,xl,yr,ground_color)
 		end
 	}
 end
@@ -529,8 +523,9 @@ function make_plyr(p,params)
 		hit_ttl-=1
 		total_t+=1
 
-		if t<3*30 then
-			if(t%30==0) sfx(2)
+		-- warning sound
+		if t<3*30 and t%30==0 then
+			sfx(2)
 		end
 		-- collision detection
 		local hit_type=ground:collide(self.pos,0.2)
@@ -540,7 +535,7 @@ function make_plyr(p,params)
 			self.dead=true
 		elseif hit_type==3 then
 			-- coins: bonus time
-			add_time_bonus(0.5)
+			add_time_bonus(1)
 			sfx(8)
 		elseif hit_ttl<0 and hit_type==1 then
 			-- props: 
@@ -862,8 +857,8 @@ function play_state(params)
 			sort(out)
 			draw_drawables(out)
 			 
-			-- local cpu=flr(10000*stat(1))/100
-			-- print(cpu.."%\n"..stat(0),96,2,2)
+			local cpu=flr(10000*stat(1))/100
+			print(cpu.."%\n"..stat(0),96,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
@@ -1707,36 +1702,6 @@ function z_poly_clip(znear,v)
 	for i=1,#v do
 		v1=v[i]
 		d1=-znear+v1[3]
-		if d1>0 then
-			if(d0<=0) clip_line()
-			res[#res+1]=v1
-		elseif d0>0 then
-   clip_line()
-		end
-		v0,d0=v1,d1
-	end
-	return res
-end
-
-function plane_poly_clip(n,v)
-	local dist={}
-	for i,a in pairs(v) do
-		dist[i]=n[4]-(a[1]*n[1]+a[2]*n[2]+a[3]*n[3])
-	end
-
-	local res={}
-	local v0,d0,v1,d1,t,r=v[#v],dist[#v]
- -- use local closure
- local clip_line=function()
- 	local r,t=make_v(v0,v1),d0/(d0-d1)
- 	v_scale(r,t)
- 	v_add(r,v0)
- 	if(v0[4]) r[4]=lerp(v0[4],v1[4],t)
- 	if(v0[5]) r[5]=lerp(v0[5],v1[5],t)
- 	res[#res+1]=r
- end
-	for i=1,#v do
-		v1,d1=v[i],dist[i]
 		if d1>0 then
 			if(d0<=0) clip_line()
 			res[#res+1]=v1

@@ -330,7 +330,7 @@ function make_cam()
 			v_scale(n,16)
 			local u,v=n[1],n[2]
 			
-			fillp(0xa5a5)
+			fillp(0xf0f0)
 			circfill(x0-3*u+2*v,y0+3*v+2*u,8,0xc7)
 			fillp()
 			circfill(x0-3*u+2*v,y0+3*v+2*u,5,7)
@@ -378,7 +378,14 @@ function make_car(p)
 		end,
 		get_up=function()
 			-- compensate slope when not facing slope
-			return v_lerp(v_up,up,abs(cos(angle)))
+			local scale=abs(cos(angle))
+			local u=v_lerp(v_up,up,scale)
+			local m=make_m_from_v_angle(u,angle)
+			
+			local right=m_right(m)
+			v_add(u,right,sin(steering_angle)*scale/2)
+			v_normz(u)
+			return u
 		end,
 		apply_force_and_torque=function(self,f,t)
 			-- add(debug_vectors,{f=f,p=p,c=11,scale=t})
@@ -482,7 +489,7 @@ function make_car(p)
 				-- big enough jump?
 				if(on_air_ttl>5) sfx(12) on_air_ttl=0 sfx(11) 
 			end
-			if(self.on_ground==false) on_air_ttl=10
+			if(self.on_ground==false) sfx(11,-2) on_air_ttl=10
 
 			self.height=lerp(self.height,tgt_height,0.4)
 
@@ -526,7 +533,7 @@ function make_plyr(p,params)
 		local do_jump
 		if self.on_ground==true then
 			-- was flying?
-			if(air_t>23) add_time_bonus(1) sfx(pick(whoa_sfx))
+			if(air_t>23) add_time_bonus(1,"air!") sfx(pick(whoa_sfx))
 			air_t=0
 
 			if btn(4) then
@@ -603,7 +610,7 @@ function make_plyr(p,params)
 		end
 
 		if reverse_t>30 then
-			add_time_bonus(ceil(reverse_t/30))
+			add_time_bonus(2,"reverse!")
 			sfx(pick(whoa_sfx))
 			reverse_t=0
 		end
@@ -813,6 +820,8 @@ function menu_state()
 						yield()
 					end
 					pop_state()
+					-- restore random seed
+					srand(time())
 					push_state(zoomin_state,play_state,panels[sel+1].params)
 				end)
 			end
@@ -918,8 +927,8 @@ function play_state(params)
 			sort(out)
 			draw_drawables(out)
 			 
-			local cpu=flr(10000*stat(1))/100
-			print(cpu.."%\n"..stat(0),96,2,2)
+			--local cpu=flr(10000*stat(1))/100
+			--print(cpu.."%\n"..stat(0),96,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
@@ -931,24 +940,27 @@ function play_state(params)
 				-- hands
 				palt(0,false)
 				palt(7,true)
-				spr(140,abs(steering)*16-24,96,4,4)
-				spr(140,96-abs(steering)*16+24,96,4,4,true)
+				spr(140,abs(steering)*16-24,90-dy/3,4,4)
+				spr(140,96-abs(steering)*16+24,90-dy/3,4,4,true)
 				palt()
 
 				-- 
 				local t,bonus,tt,ft,at,rt=plyr:score()
 				printb(time_tostr(t),nil,4,10,9,1)
-
-				local y=2
-				for _,t in pairs({tt,ft,at,rt}) do
-					print(time_tostr(t),2,y,2)
-					y+=7
-				end
-				print(a,2,y,4)
+				
+				--[[
+				tt="total time:\n"..time_tostr(tt)
+				print(tt,2,3,1)
+				print(tt,2,2,7)
+				]]
 
 				for i=1,#bonus do
 					local b=bonus[i]					
-					if(b.ttl/b.duration>0.5 or t%2==0) printb(b.t,64+b.x-#b.t/1.5,40+b.ttl,10,9,1)
+					
+					if b.ttl/b.duration>0.5 or t%2==0 then
+						if(b.msg) printb(b.msg,64+b.x-#b.msg/1.5,31+b.ttl,8,2,1)
+						printb(b.t,64+b.x-#b.t/1.5,40+b.ttl,10,9,1)
+					end
 				end
 
 				if(plyr.gps) gps_sprite(-plyr.gps)		
@@ -961,7 +973,11 @@ function play_state(params)
 					end
 				end
 				spr(108,56,12,2,2)
-								
+					
+				-- help msg?
+				if tt<90 then
+					printb("🅾️: charge jump",nil,112,6,5,1)
+				end
 			end
 
 			if(fade_async) fade_async=corun(fade_async,0,true)
@@ -1345,7 +1361,7 @@ function make_ground(params)
 					h[i]=t.h+h[i]/2
 				end
 				-- coins
-				actors[ii]=clone(coin)-- {strip=coins_strip,speed=3,r=1,score=1}
+				if(slice_id%2==0) actors[ii]=clone(coin)-- {strip=coins_strip,speed=3,r=1,score=1}
 			end
 		end
 

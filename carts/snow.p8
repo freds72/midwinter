@@ -497,10 +497,10 @@ function make_car(p)
 			-- mix: volume for base pitch
 			-- alter with "height" to include slope "details"
 			-- sfx 11: 0x3200+68*11
-			local pitch=v_len(velocity)*max(48-64*self.height+rnd(4))
+			local pitch=v_len(velocity)*max(48-64*self.height)
 			for src=0x34ec,0x350a,2 do
 				local s=peek2(src)
-				poke2(src,bor(band(0xffc0,s),band(0x3f,flr(pitch))))
+				poke2(src,bor(band(0xffc0,s),band(0x3f,flr(pitch+rnd(4)))))
 			end
 		end
 	}	
@@ -530,8 +530,16 @@ function make_plyr(p,params)
 		if(btn(1)) da=-1
 		local do_jump
 		if self.on_ground==true then
-			-- was flying?
-			if(air_t>23) add_time_bonus(1,"air!") sfx(pick(whoa_sfx))
+			-- was flying?			
+			if air_t>23 then
+				-- pro trick? :)
+				if reverse_t>0 then
+					add_time_bonus(2,"reverse air!")
+				else
+					add_time_bonus(1,"air!")
+				end
+				sfx(pick(whoa_sfx))
+			end
 			air_t=0
 
 			if btn(4) then
@@ -561,10 +569,6 @@ function make_plyr(p,params)
 		hit_ttl-=1
 		total_t+=1
 
-		-- warning sound
-		if t<3*30 and t%30==0 then
-			sfx(2)
-		end
 		-- collision detection
 		local pos,angle,_,velocity=self:get_pos()
 		local hit_type,hit_actor=ground:collide(pos,0.2)
@@ -608,7 +612,7 @@ function make_plyr(p,params)
 		end
 
 		if reverse_t>30 then
-			add_time_bonus(2,"reverse!")
+			add_time_bonus(3,"reverse!")
 			sfx(pick(whoa_sfx))
 			reverse_t=0
 		end
@@ -939,8 +943,14 @@ function play_state(params)
 
 				-- 
 				local t,bonus,total_t=plyr:score()
-				printb(time_tostr(t),nil,4,10,9,1)
-				
+				-- warning sound under 5s
+				local t_str=time_tostr(t)
+				printb(t_str,nil,4,10,9,1)
+				if t<150 then
+					if(t%30==0) sfx(2)
+					if(t%8<4) printb(t_str,nil,4,8,2,1)
+				end
+
 				--[[
 				tt="total time:\n"..time_tostr(tt)
 				print(tt,2,3,1)
@@ -1018,7 +1028,7 @@ function plyr_death_state(pos,total_t,freeride_t,params,time_over)
 		"total time: "..time_tostr(total_t),
 		"freeride time: "..time_tostr(freeride_t)}	
 	local msg_colors={
-		{10,9,1},{8,2,1}
+		{10,9,1},{7,5,1}
 	}
 	local msg_y,msg_tgt_y,msg_tgt_i=-20,{16,-20},0
 
@@ -1151,13 +1161,9 @@ function draw_drawables(objects)
 				c0=0x54
 				if(d.dist>7) c0=0x4d
 				if(d.dist>8) c0=0xd5
-			elseif d.f.m==1 then
+			else
 				if(d.dist>7) c0=0x6d
 				if(d.dist>8) c0=0xd5
-			else
-				c0=0x65
-				if(d.dist>7) c0=0x5d
-				if(d.dist>8) c0=0xd1
 			end
 			fillp(d.f.cf)
 			cam:project_poly(d.v,c0)
@@ -1477,10 +1483,10 @@ function make_ground(params)
 
 	-- raycasting constants
 	local angles={}
-	for i=0,23 do
-		add(angles,atan2(7.5,i-12.5))
+	for i=0,31 do
+		add(angles,atan2(8,i-16.5))
 	end
-
+	
 	local function visible_tiles(pos,angle)
 		local x,y=pos[1]/dx,pos[3]/dz
 		local x0,y0=flr(x),flr(y)
@@ -2075,7 +2081,7 @@ __map__
 __sfx__
 000500000a16012160000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000600001e35024350313402a3301f100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-00080000154601d4501245008450000000000000000235001d5000e30019400000000000029300000000000000000245001e50000000000001a40000000253000000000000000000000000000000000000000000
+00080000310602a0501240008400000000000000000235001d5000e30019400000000000029300000000000000000245001e50000000000001a40000000253000000000000000000000000000000000000000000
 000600000f450194501a45015450114500e4500b45008450074500545002450014500000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 000600000f1700f1701017010170101600e1600b150081300114019700017000070007100091000d1000f1000b100081000b100091000b100091000b1000b100091000a1000a1000a1000b1000b1000b1000c100
 00020000175501c550235502655028550295502a5502b5502b5502a55026550235501c55019550145500f5500855002550005400052002510181001a1001c1001f10021100241002610027100000000000000000

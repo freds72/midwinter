@@ -393,7 +393,7 @@ function make_car(p)
 			v_add(forces,f)
 			torque+=t
 		end,
-		prepare=function(self)
+		integrate=function(self)
 			-- gravity and ground
 			self:apply_force_and_torque(g,0)
 			-- on ground?
@@ -414,9 +414,8 @@ function make_car(p)
 			-- some friction
 			--v_scale(velocity,1-f)
 			v_add(velocity,velocity,-f*v_dot(velocity,velocity))
-		end,
-		integrate=function(self)
-		 	-- update pos & orientation
+			
+			-- update pos & orientation
 			v_add(self.pos,velocity)
 			-- limit rotating velocity
 			angularv=mid(angularv,-1,1)
@@ -649,7 +648,6 @@ function make_snowball(pos)
 	body.update=function(self)		
 
 		-- physic update
-		self:prepare()
 		self:integrate()
 		body_update(self)
 
@@ -830,9 +828,7 @@ function menu_state()
 end
 
 function zoomin_state(next,params)
-	local ttl,dttl=30,0.01
-
-	local fade_async=cocreate(whiteout_async)
+	local ttl,dttl,fade_async=30,0.01,cocreate(whiteout_async)
 
 	-- copy backbuffer
 	memcpy(0x0,0x6000,128*64)
@@ -841,7 +837,7 @@ function zoomin_state(next,params)
 		-- draw
 		draw=function()
 			-- zoom effect
-			local s=(3*(30-ttl)/30+1)
+			local s=3*(30-ttl)/30+1
 			palt(0,false)
 			local dx=-abs(64*s-64)		
 			sspr(0,0,128,128,dx,dx,128*s,128*s)
@@ -944,12 +940,12 @@ function play_state(params)
 				-- 
 				local t,bonus,total_t=plyr:score()
 				-- warning sound under 5s
-				local t_str=time_tostr(t)
-				printb(t_str,nil,4,10,9,1)
+				local bk,y_trick=1,110
 				if t<150 then
 					if(t%30==0) sfx(2)
-					if(t%8<4) printb(t_str,nil,4,8,2,1)
+					if(t%8<4) bk=8
 				end
+				printb(time_tostr(t),nil,4,10,9,bk)
 
 				--[[
 				tt="total time:\n"..time_tostr(tt)
@@ -961,7 +957,8 @@ function play_state(params)
 					local b=bonus[i]					
 					
 					if b.ttl/b.duration>0.5 or t%2==0 then
-						if(b.msg) printb(b.msg,64+b.x-#b.msg/1.5,31+b.ttl,8,2,1)
+						-- handle edge case if multiple tricks!
+						if(b.msg) printb(b.msg,nil,y_trick,6,5,1) y_trick-=9
 						printb(b.t,64+b.x-#b.t/1.5,40+b.ttl,10,9,1)
 					end
 				end
@@ -990,7 +987,6 @@ function play_state(params)
 			cam:update()
 			if plyr then
 				plyr:control()	
-				plyr:prepare()
 				plyr:integrate()
 				plyr:update()
 
@@ -1432,10 +1428,9 @@ function make_ground(params)
 		s0.f=f
 	end
 
-	local ybase=0
 	for j=0,nz-1 do
-		slices[j]=make_slice(ybase)
-		ybase-=delta_slope+rnd(0.1*delta_slope)
+		-- bugfix: avoid blocking area at startup
+		slices[j]=make_slice(-j*delta_slope)
 	end
 	-- create faces
 	for j=0,nz-2 do

@@ -5,4 +5,7 @@ config.txt
 /carts/demos
 /cdata
 *.blend1
+/carts/*.bin
+/carts/*.zip
+_label.png
 sdl_controllers.txt

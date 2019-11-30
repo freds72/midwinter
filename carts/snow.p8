@@ -290,7 +290,7 @@ function make_cam()
 		end,
 		project2d=function(self,v)
 			local w=63.5/v[3]
-			return v.x or 63.5+flr(w*v[1]),v.y or 63.5-flr(w*v[2]),w
+			return 63.5+flr(w*v[1]),63.5-flr(w*v[2]),w
 		end,
 		project_poly=function(self,p,c0)
 			local x0,y0=self:project2d(p[1])
@@ -921,7 +921,7 @@ function play_state(params)
 			draw_drawables(out)
 			 
 			--local cpu=flr(10000*stat(1))/100
-			--print(cpu.."%\n"..stat(0),96,2,2)
+			-- print(stat(1),96,2,2)
 
 			if plyr then
 				local pos,a,steering=plyr:get_pos()
@@ -1052,7 +1052,9 @@ function plyr_death_state(pos,total_t,freeride_t,params,time_over)
 			if text_ttl>0 and not time_over then
 				print(active_text,60,50+text_ttl,8)
 			end
-			if((time()%1)<0.5) printb("❎/🅾️ retry",42,120,10,5,1) printb("game over!",nil,38,8,2,7)
+			printb("game over!",nil,38,8,2,7)
+
+			if((time()%1)<0.5) printb("❎/🅾️ retry",42,120,10,5,1) 
 		end,
 		update=function()
 			msg_y=lerp(msg_y,msg_tgt_y[msg_tgt_i+1],0.08)
@@ -1169,11 +1171,9 @@ function draw_drawables(objects)
 				local x,y,z=v0[1]+u[1],v0[2]+u[2],v0[3]+u[3]
 				local az=m[3]*x+m[7]*y+m[11]*z+m[15]
 				if az>z_near then	
-					local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
 					-- sprite
 					local w=63.5/az
-					local x,y=63.5+flr(w*ax),63.5-flr(w*ay)
-					draw_sprite(d.fa,x,y,4*w,d.dist)
+					draw_sprite(d.fa,63.5+w*(m[1]*x+m[5]*y+m[9]*z+m[13]),63.5-w*(m[2]*x+m[6]*y+m[10]*z+m[14]),4*w,d.dist)
 				end
 			end
 		end
@@ -1297,8 +1297,7 @@ function make_ground(params)
 			elseif -ax>az then outcode+=k_left
 			end	
 
-			local ay=m[2]*x+m[6]*y+m[10]*z+m[14]
-			t[k]={ax,ay,az,outcode=outcode,x=63.5+flr(63.5*ax/az),y=63.5-flr(63.5*ay/az)}
+			t[k]={ax,m[2]*x+m[6]*y+m[10]*z+m[14],az,outcode=outcode}
 			return t[k]
 		end
 	}
@@ -1468,20 +1467,26 @@ function make_ground(params)
 			local m,u=v_cache.m,actor.u
 			local x,y,z=v0[1]+u[1],v0[2]+u[2],v0[3]+u[3]
 			local az=m[3]*x+m[7]*y+m[11]*z+m[15]
-			if az>z_near and az<64 then	
-				local ax,ay=m[1]*x+m[5]*y+m[9]*z+m[13],m[2]*x+m[6]*y+m[10]*z+m[14]
-				local w=63.5/az
-				out[#out+1]={key=1/(ay*ay+az*az),a=actor,x=63.5+flr(w*ax),y=63.5-flr(w*ay),w=4*w,dist=dist}
+			if az>z_near then	
+				local ay,w=m[2]*x+m[6]*y+m[10]*z+m[14],63.5/az
+				out[#out+1]={key=1/(ay*ay+az*az),a=actor,x=63.5+w*(m[1]*x+m[5]*y+m[9]*z+m[13]),y=63.5-w*ay,w=4*w,dist=dist}
 			end
 		end
 	end
 
 	-- raycasting constants
-	local angles={}
-	for i=0,31 do
-		add(angles,atan2(8,i-16.5))
+	--[[
+	local angles,dists={},{}
+	for i=-16,16 do
+		add(angles,atan2(8,i))
+		add(dists,sqrt(11*11+i*i))
 	end
-	
+	]]
+	local angles={}
+	for i=-16,16 do
+		add(angles,atan2(8,i))
+	end
+
 	local function visible_tiles(pos,angle)
 		local x,y=pos[1]/dx,pos[3]/dz
 		local x0,y0=flr(x),flr(y)
@@ -1514,9 +1519,8 @@ function make_ground(params)
 					mapy+=mapdy
 				end
 				-- non solid visible tiles
-				if band(bor(mapx,mapy),0xffe0)==0 then
-					tiles[mapx+mapy*nx]=dist
-				end
+				if(band(bor(mapx,mapy),0xffe0)!=0) break
+				tiles[mapx+mapy*nx]=dist
 			end				
 		end
 		return tiles	
@@ -1911,22 +1915,22 @@ eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000000000000000
 0000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000009499a90000000000094a400000000000004400000000000004a49000000
 00000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000099aa99000000000009aa400000000000004400000000000004aa9000000
 00000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000009999000000000000094000000000000004400000000000000490000000
-000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000111111000000eeeeeeeaaeeeeeee00000000000000000000000000000000
-000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa9944100000eeeeeea00aeeeeee00000000000000000000000000000000
-0000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa9944100000eeeeea0aa0aeeeee00000000000000000000000000000000
-00000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa99441000000eeeeea0aa0aeeeee00000000000000000000000000000000
-000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000001aa99441000000eeeea0aaaa0aeeee00000000000000000000000000000000
-00000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000000001aa994410000000eeeea0a00a0aeeee00000000000000000000000000000000
-00000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000000000001aa994410000000eeea0aa00aa0aeee00000000000000000000000000000000
-0000000000000000eeeeeeeeeeeeeeeeeeeeeeee00000000000e0000000000001aa9944100000000eeea0aa00aa0aeee00000000000000000000000000000000
-00000000000000000000eeeeeeeeeee0000000000000000eeeeeee00000000001aa9944100000000eea0aaa00aaa0aee00000000000000000000000000000000
-00000000000000000000000000000000000000000000eeeeeeee00000000000001aa994410000000eea0aaaaaaaa0aee00000000000000000000000000000000
-000000000000000000000000000000000000000000eeeeeee00000000000000001aa994410000000ea0aaaa00aaaa0ae00000000000000000000000000000000
-0000000000000000000000000000000eeeeeeeee000e00000000000000000000001aa99441000000ea0aaaa00aaaa0ae00000000000000000000000000000000
-0000000000000000000eeeeeee00eeeeeeeeeeee000000000000000000000000001aa99441000000a0aaaaaaaaaaaa0a00000000000000000000000000000000
-00000000000000000000eeeeeee00eeeee0000000000000000000000000000000001aa9944100000a00000000000000a00000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000001aa9944100000eaaaaaaaaaaaaaae00000000000000000000000000000000
-00000000000000000000000000000000000000000000000000000000000000000000111111000000eeeeeed676eeeeee00000000000000000000000000000000
+000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee0000000000000111111000000eeeeeeeaaeeeeeee00000000000000000000cccccccc0000
+000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa9944100000eeeeeea00aeeeeee000000000000000000cccccccccccc00
+0000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa9944100000eeeeea0aa0aeeeee00000000000000000ccc666ccc666cc0
+00000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000001aa99441000000eeeeea0aa0aeeeee0000000000000000ccc62226c62226cc
+000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee000000000000001aa99441000000eeeea0aaaa0aeeee0000000000000000ccc28282c28282cc
+00000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000000001aa994410000000eeeea0a00a0aeeee0000000000000000ccc82828c82828cc
+00000000000000eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee00000000000000000001aa994410000000eeea0aa00aa0aeee0000000000000000ccc88888c88888cc
+0000000000000000eeeeeeeeeeeeeeeeeeeeeeee00000000000e0000000000001aa9944100000000eeea0aa00aa0aeee0000000000000000ccc88988c88988cc
+00000000000000000000eeeeeeeeeee0000000000000000eeeeeee00000000001aa9944100000000eea0aaa00aaa0aee000000000000000066689a98689a9866
+00000000000000000000000000000000000000000000eeeeeeee00000000000001aa994410000000eea0aaaaaaaa0aee00000000000000007778a8a878a8a877
+000000000000000000000000000000000000000000eeeeeee00000000000000001aa994410000000ea0aaaa00aaaa0ae00000000000000007778888878888877
+0000000000000000000000000000000eeeeeeeee000e00000000000000000000001aa99441000000ea0aaaa00aaaa0ae00000000000000007778898878898877
+0000000000000000000eeeeeee00eeeeeeeeeeee000000000000000000000000001aa99441000000a0aaaaaaaaaaaa0a000000000000000077788a88788a8877
+00000000000000000000eeeeeee00eeeee0000000000000000000000000000000001aa9944100000a00000000000000a00000000000000007778888878888877
+00000000000000000000000000000000000000000000000000000000000000000001aa9944100000eaaaaaaaaaaaaaae00000000000000007778888878888877
+00000000000000000000000000000000000000000000000000000000000000000000111111000000eeeeeed676eeeeee00000000000000007778888878888877
 __label__
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc777777777777
 cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc777777777777

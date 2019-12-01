@@ -769,11 +769,11 @@ function menu_state()
 
 			if sel==sel_tgt then
 				local s="best⧗: "..time_tostr(panels[sel+1].params.record_t)
-				print(s,64-2*#s,96,sget(37,16*(time()%1)))
+				print(s,64-2*#s,97,sget(37,16*(time()%1)))
 			end
 
-			printb("⬅️➡️ select track",31,110,7,5,1)
-			if((time()%1)<0.5) printb("❎/🅾️ go!",50,120,10,5,1)
+			printb("⬅️➡️ select track",31,110,7,5)
+			if((time()%1)<0.5) printb("❎/🅾️ go!",50,120,10,5)
 			print("▤@freds72 - ♪@gruber",20,2,1)
 
 			-- title
@@ -976,7 +976,8 @@ function play_state(params)
 					
 				-- help msg?
 				if total_t<90 then
-					printb("🅾️: charge jump",nil,112,6,5,1)
+					printb("🅾️: charge jump",nil,102,6,5,1)
+					printb("❎: restart",nil,112,8,2,1)
 				end
 			end
 
@@ -1006,6 +1007,12 @@ function play_state(params)
 					push_state(plyr_death_state,plyr:get_pos(),total_t,freeride_t,params,plyr.time_over)
 					-- not active
 					plyr=nil
+				else	
+					-- reset
+					if btnp(5) then
+						pop_state()
+						push_state(zoomin_state,play_state,params)
+					end
 				end
 			end
 
@@ -1719,9 +1726,11 @@ end
 
 function printb(s,x,y,cf,cs,cb)
 	x=x or 64-#s*2
-	for i=-1,1 do
-		for j=-2,1 do
-			print(s,x+i,y+j,cb)
+	if cb then
+		for i=-1,1 do
+			for j=-2,1 do
+				print(s,x+i,y+j,cb)
+			end
 		end
 	end
 	print(s,x,y,cs)

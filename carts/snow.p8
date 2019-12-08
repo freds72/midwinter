@@ -358,9 +358,8 @@ function make_cam()
 	}
 end
 
--- "physic body" for simple car
-
-function make_car(p)
+-- basic gravity+slope physic body
+function make_body(p)
 	-- last contact face
 	local up,oldf={0,1,0}
 
@@ -416,7 +415,10 @@ function make_car(p)
 			v_add(velocity,velocity,-f*v_dot(velocity,velocity))
 			
 			-- update pos & orientation
+			--local x,z=self.pos[1],self.pos[3]
 			v_add(self.pos,velocity)
+			--self.pos[1],self.pos[3]=x,z
+
 			-- limit rotating velocity
 			angularv=mid(angularv,-1,1)
 			angle+=angularv
@@ -462,7 +464,7 @@ function make_car(p)
 					self:apply_force_and_torque(right,-steering_angle*ski_len/4)
 				end
 			elseif self.on_ground==false then
-				self:apply_force_and_torque({0,0,0},-steering_angle/8)
+				self:apply_force_and_torque({0,0,0},-steering_angle/4)
 			end			
 		end,
 		update=function(self)
@@ -506,12 +508,14 @@ function make_car(p)
 end
 
 function make_plyr(p,params)
-	local body,hp=make_car(p),3
+	local body,hp=make_body(p),3
 
 	local body_update=body.update
 
 	local hit_ttl,jump_ttl,jump_pressed=0,0
 	
+	local spin_t,spin_angle,spin_prev=0,0
+
 	-- timers + avoid free airtime on drop!
 	local t,bonus,total_t,freeride_t,reverse_t,air_t=params.total_t,{},0,0,0,-60
 	local whoa_sfx={5,6,7}
@@ -519,8 +523,10 @@ function make_plyr(p,params)
 	-- time bonus cannot be negative!
 	local function add_time_bonus(tb,msg)
 		t+=tb*30
-		local ttl=8+rnd(10)
+		local ttl=12+rnd(12)
 		add(bonus,{t="+"..tb.."s",msg=msg,x=rnd(5),ttl=ttl,duration=ttl})
+		-- trick?
+		if(msg) sfx(pick(whoa_sfx))
 	end
 
 	body.control=function(self)	
@@ -537,7 +543,7 @@ function make_plyr(p,params)
 				else
 					add_time_bonus(1,"air!")
 				end
-				sfx(pick(whoa_sfx))
+				freeride_t+=air_t
 			end
 			air_t=0
 
@@ -570,6 +576,28 @@ function make_plyr(p,params)
 
 		-- collision detection
 		local pos,angle,_,velocity=self:get_pos()
+		if not spin_prev then
+			spin_t,spin_angle,spin_prev=0,0,angle
+		else
+			local da=spin_prev-angle
+			-- shortest angle
+			if(abs(da)>0.5) da+=0.5
+			-- doing nothing or breaking the spin?
+			if abs(spin_angle)>=abs(spin_angle+da) then
+				spin_prev=nil
+			else
+				spin_t+=1
+				spin_angle+=da
+				spin_prev=angle
+			end
+		end
+		
+		if abs(spin_angle)>1 then
+			add_time_bonus(2,"360!")
+			freeride_t+=spin_t
+			spin_prev=nil
+		end
+
 		local hit_type,hit_actor=ground:collide(pos,0.2)
 		if hit_type==2 then
 			-- walls: insta-death
@@ -586,8 +614,8 @@ function make_plyr(p,params)
 			-- temporary invincibility
 			hit_ttl=20
 			hp-=1
-			-- failed!
-			reverse_t=0
+			-- kill tricks
+			reverse_t,spin_prev=0
 		end
 		
 		local slice,slice_extent=ground:get_track(pos)
@@ -601,18 +629,19 @@ function make_plyr(p,params)
 				slice.is_checkpoint=nil
 			end
 		else
-			-- free riding!
-			freeride_t+=1
 			self.on_track=nil
 		end
-
-		if velocity[3]>0 and abs((angle%1+1)%1-0.5)<0.12 then
+		
+		-- need to have some speed
+		if v_dot(velocity,{-sin(angle),0,cos(angle)})<-0.2 then
 			reverse_t+=1
+		else
+			reverse_t=0
 		end
 
 		if reverse_t>30 then
 			add_time_bonus(3,"reverse!")
-			sfx(pick(whoa_sfx))
+			freeride_t+=reverse_t
 			reverse_t=0
 		end
 
@@ -640,7 +669,7 @@ function make_plyr(p,params)
 end
 
 function make_snowball(pos)
-	local body=make_car(pos)
+	local body=make_body(pos)
 	
 	local body_update=body.update
 
@@ -866,6 +895,8 @@ function play_state(params)
 	-- stop music
 	music(-1,250)
 
+	-- srand(15)
+
 	-- start over
 	actors,ground={},make_ground(params)
 
@@ -957,10 +988,10 @@ function play_state(params)
 					local b=bonus[i]					
 					
 					if b.ttl/b.duration>0.5 or t%2==0 then
-						-- handle edge case if multiple tricks!
-						if(b.msg) printb(b.msg,nil,y_trick,6,5,1) y_trick-=9
 						printb(b.t,64+b.x-#b.t/1.5,40+b.ttl,10,9,1)
 					end
+					-- handle edge case if multiple tricks!
+					if(b.msg) printb(b.msg,nil,y_trick,6,5,1) y_trick-=9
 				end
 
 				if(plyr.gps) gps_sprite(-plyr.gps)		
@@ -1360,7 +1391,7 @@ function make_ground(params)
 			else
 				-- side tracks
 				for i=i0,i1 do				
-					h[i]=t.h+h[i]/2
+					h[i]=(t.h+h[i])/2
 				end
 				-- coins
 				if(slice_id%2==0) actors[ii]=clone(coin)-- {strip=coins_strip,speed=3,r=1,score=1}
@@ -1787,24 +1818,16 @@ end
 ]]
 
 function z_poly_clip(znear,v)
-	local res={}
-	local v0,v1,d1,t,r=v[#v]
-	local d0=-znear+v0[3]
- 	-- use local closure
- 	local clip_line=function()
- 		local r,t=make_v(v0,v1),d0/(d0-d1)
- 		v_scale(r,t)
- 		v_add(r,v0)
- 		res[#res+1]=r
- 	end
+	local res,v0={},v[#v]
+	local d0=v0[3]-znear
 	for i=1,#v do
-		v1=v[i]
-		d1=-znear+v1[3]
+		local v1=v[i]
+		local d1=v1[3]-znear
 		if d1>0 then
-			if(d0<=0) clip_line()
+			if(d0<=0) res[#res+1]=v_lerp(v0,v1,d0/(d0-d1))
 			res[#res+1]=v1
 		elseif d0>0 then
-   clip_line()
+   res[#res+1]=v_lerp(v0,v1,d0/(d0-d1))
 		end
 		v0,d0=v1,d1
 	end

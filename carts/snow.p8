@@ -514,10 +514,10 @@ function make_plyr(p,params)
 
 	local hit_ttl,jump_ttl,jump_pressed=0,0
 	
-	local spin_t,spin_angle,spin_prev=0,0
+	local spin_angle,spin_prev=0
 
 	-- timers + avoid free airtime on drop!
-	local t,bonus,total_t,freeride_t,reverse_t,air_t=params.total_t,{},0,0,0,-60
+	local t,bonus,total_t,total_tricks,reverse_t,air_t=params.total_t,{},0,0,0,-60
 	local whoa_sfx={5,6,7}
 
 	-- time bonus cannot be negative!
@@ -526,7 +526,7 @@ function make_plyr(p,params)
 		local ttl=12+rnd(12)
 		add(bonus,{t="+"..tb.."s",msg=msg,x=rnd(5),ttl=ttl,duration=ttl})
 		-- trick?
-		if(msg) sfx(pick(whoa_sfx))
+		if(msg) sfx(pick(whoa_sfx)) total_tricks+=1
 	end
 
 	body.control=function(self)	
@@ -543,7 +543,6 @@ function make_plyr(p,params)
 				else
 					add_time_bonus(1,"air!")
 				end
-				freeride_t+=air_t
 			end
 			air_t=0
 
@@ -577,7 +576,7 @@ function make_plyr(p,params)
 		-- collision detection
 		local pos,angle,_,velocity=self:get_pos()
 		if not spin_prev then
-			spin_t,spin_angle,spin_prev=0,0,angle
+			spin_angle,spin_prev=0,angle
 		else
 			local da=spin_prev-angle
 			-- shortest angle
@@ -586,7 +585,6 @@ function make_plyr(p,params)
 			if abs(spin_angle)>=abs(spin_angle+da) then
 				spin_prev=nil
 			else
-				spin_t+=1
 				spin_angle+=da
 				spin_prev=angle
 			end
@@ -594,7 +592,6 @@ function make_plyr(p,params)
 		
 		if abs(spin_angle)>1 then
 			add_time_bonus(2,"360!")
-			freeride_t+=spin_t
 			spin_prev=nil
 		end
 
@@ -641,7 +638,6 @@ function make_plyr(p,params)
 
 		if reverse_t>30 then
 			add_time_bonus(3,"reverse!")
-			freeride_t+=reverse_t
 			reverse_t=0
 		end
 
@@ -661,7 +657,7 @@ function make_plyr(p,params)
 	end
 
 	body.score=function()
-		return t,bonus,total_t,freeride_t
+		return t,bonus,total_t,total_tricks
 	end
 
 	-- wrapper
@@ -1033,9 +1029,9 @@ function play_state(params)
 					cam:shake()
 
 					-- latest score
-					local _,_,total_t,freeride_t=plyr:score()
+					local _,_,total_t,total_tricks=plyr:score()
 					
-					push_state(plyr_death_state,plyr:get_pos(),total_t,freeride_t,params,plyr.time_over)
+					push_state(plyr_death_state,plyr:get_pos(),total_t,total_tricks,params,plyr.time_over)
 					-- not active
 					plyr=nil
 				else	
@@ -1056,36 +1052,35 @@ function play_state(params)
 	}
 end
 
-function plyr_death_state(pos,total_t,freeride_t,params,time_over)
+function plyr_death_state(pos,total_t,total_tricks,params,time_over)
 	-- convert to string
 	local active_msg,msgs=0,{
 		"total time: "..time_tostr(total_t),
-		"freeride time: "..time_tostr(freeride_t)}	
+		"total tricks: "..total_tricks}	
 	local msg_colors={
 		{10,9,1},{7,5,1}
 	}
 	local msg_y,msg_tgt_y,msg_tgt_i=-20,{16,-20},0
 
-	local snowball_sprite=make_rspr(112,0,32,0)
-	local turn_side=rnd()>0.5 and -1 or 1
+	-- snowballing!!!
+	local snowball_sprite,snowball=make_rspr(112,0,32,0),add(actors,make_snowball(pos))
+	local turn_side,tricks_rating=pick({-1,1}),{"    meh","rookie","junior🐱","★master★"}
 	local text_ttl,active_text,text=10,"yikes!",{
 		"ouch!","aie!","pok!","weee!"
 	}
-
-	-- snowballing!!!
-	local snowball=make_snowball(pos)
-	add(actors,snowball)
 
 	-- save records (if any)
 	if total_t>params.record_t then
 		dset(params.dslot,total_t)
 	end
-
+	
 	return {
 		draw=function()
 			local c=msg_colors[active_msg+1]
 			printb(msgs[active_msg+1],nil,msg_y,c[1],c[2],c[3])
-			if(active_msg==0 and total_t>params.record_t) print("★new record★",50+rnd(2)-1,msg_y+8+rnd(2)-1,c[2])
+			local x,y=rnd(2)-1,msg_y+8+rnd(2)-1
+			if(active_msg==0 and total_t>params.record_t) print("★new record★",x+50,y,c[2])
+			if(active_msg==1) print(tricks_rating[min(flr(total_tricks/5)+1,4)],x+70,y,c[2])
 
 			if text_ttl>0 and not time_over then
 				print(active_text,60,50+text_ttl,8)
